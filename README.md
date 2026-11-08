@@ -103,7 +103,7 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.5
 - Sprachauswahl Deutsch / Englisch für Programm, Tray-Menü und Update-Meldungen; beim ersten Start wird die Windows-Sprache übernommen.
 - Installer auf Deutsch und Englisch.
 - README auf Englisch.

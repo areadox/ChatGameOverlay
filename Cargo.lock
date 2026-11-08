@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "chat-game-overlay"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "eframe",
  "global-hotkey",
