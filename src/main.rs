@@ -2,6 +2,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod irc;
+mod update;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use serde::{Deserialize, Serialize};
 
 use irc::{Badge, ChatEvent, ChatMessage, Status};
+use update::UpdateState;
 
 const APP_NAME: &str = "ChatGameOverlay";
 const HOTKEY_LOCK_TEXT: &str = "Strg + Umschalt + F9";
@@ -37,6 +39,8 @@ struct Config {
     /// Hintergrund im fixierten Modus nur zeigen, wenn Nachrichten sichtbar sind
     auto_hide_bg: bool,
     start_locked: bool,
+    /// Beim Start auf GitHub nach neuer Version suchen
+    auto_update_check: bool,
 }
 
 impl Default for Config {
@@ -50,6 +54,7 @@ impl Default for Config {
             show_badges: true,
             auto_hide_bg: true,
             start_locked: false,
+            auto_update_check: true,
         }
     }
 }
@@ -75,6 +80,8 @@ struct OverlayApp {
     hk_lock: u32,
     hk_hide: u32,
     hotkey_error: Option<String>,
+
+    update: update::Shared,
 }
 
 impl OverlayApp {
@@ -113,9 +120,13 @@ impl OverlayApp {
             hk_lock: lock.id(),
             hk_hide: hide.id(),
             hotkey_error,
+            update: Arc::new(std::sync::Mutex::new(UpdateState::Idle)),
         };
         if !app.cfg.channel.trim().is_empty() {
             app.connect(&cc.egui_ctx);
+        }
+        if app.cfg.auto_update_check {
+            update::check(app.update.clone(), cc.egui_ctx.clone());
         }
         app
     }
@@ -188,6 +199,72 @@ impl OverlayApp {
         }
     }
 
+    fn update_state(&self) -> UpdateState {
+        self.update.lock().map(|g| g.clone()).unwrap_or(UpdateState::Idle)
+    }
+
+    fn restart_after_update(&mut self, ctx: &egui::Context) {
+        if update::restart() {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        } else if let Ok(mut g) = self.update.lock() {
+            *g = UpdateState::Failed("Neustart fehlgeschlagen – bitte Programm selbst neu starten".into());
+        }
+    }
+
+    fn update_section(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new("Updates:").strong());
+        ui.label(format!("Installierte Version: {}", update::CURRENT));
+        let ok = Color32::from_rgb(60, 200, 90);
+        let warn = Color32::from_rgb(230, 120, 80);
+        let ctx = ui.ctx().clone();
+        match self.update_state() {
+            UpdateState::Idle => {}
+            UpdateState::Checking => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Suche nach Updates …");
+                });
+            }
+            UpdateState::UpToDate => {
+                ui.colored_label(ok, "✔ Du hast die neueste Version.");
+            }
+            UpdateState::Available { version, url } => {
+                ui.colored_label(ok, format!("Neue Version {version} verfügbar."));
+                ui.horizontal(|ui| {
+                    if ui.button("Jetzt aktualisieren").clicked() {
+                        update::install(self.update.clone(), ctx.clone(), version.clone(), url.clone());
+                    }
+                    ui.hyperlink_to("Änderungen ansehen", update::RELEASES_PAGE);
+                });
+            }
+            UpdateState::Downloading { version } => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Lade Version {version} herunter …"));
+                });
+            }
+            UpdateState::Installed { version } => {
+                ui.colored_label(ok, format!("Version {version} ist installiert."));
+                if ui.button("Jetzt neu starten").clicked() {
+                    self.restart_after_update(&ctx);
+                }
+            }
+            UpdateState::Failed(e) => {
+                ui.colored_label(warn, e);
+            }
+        }
+        let busy = matches!(
+            self.update_state(),
+            UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Installed { .. }
+        );
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new("Nach Updates suchen")).clicked() {
+                update::check(self.update.clone(), ctx.clone());
+            }
+        });
+        ui.checkbox(&mut self.cfg.auto_update_check, "Beim Start automatisch nach Updates suchen");
+    }
+
     fn title_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let (dot, status_text) = match self.status {
@@ -212,6 +289,29 @@ impl OverlayApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("✖").on_hover_text("Beenden").clicked() {
                     ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+                }
+                let update_color = Color32::from_rgb(60, 200, 90);
+                match self.update_state() {
+                    UpdateState::Available { version, .. } => {
+                        if ui
+                            .button(egui::RichText::new("⬆").color(update_color))
+                            .on_hover_text(format!("Version {version} verfügbar – in den Einstellungen installieren"))
+                            .clicked()
+                        {
+                            self.show_settings = true;
+                        }
+                    }
+                    #[allow(clippy::collapsible_match)]
+                    UpdateState::Installed { version } => {
+                        if ui
+                            .button(egui::RichText::new("⟳").color(update_color))
+                            .on_hover_text(format!("Version {version} installiert – jetzt neu starten"))
+                            .clicked()
+                        {
+                            self.restart_after_update(ui.ctx());
+                        }
+                    }
+                    _ => {}
                 }
                 if ui
                     .button("🔒")
@@ -283,6 +383,8 @@ impl OverlayApp {
                 ui.checkbox(&mut self.cfg.start_locked, "Beim Start gleich fixieren");
 
                 ui.add_space(8.0);
+                ui.separator();
+                self.update_section(ui);
                 ui.separator();
                 ui.label(egui::RichText::new("Hotkeys (auch im Spiel):").strong());
                 ui.label(format!("{HOTKEY_LOCK_TEXT}: fixieren / bearbeiten"));
@@ -532,6 +634,11 @@ fn icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
+    // Nach einem Update kurz warten, bis die alte Instanz beendet ist
+    // (gibt Hotkeys frei und speichert ihre Einstellungen).
+    if std::env::args().any(|a| a == "--nach-update") {
+        std::thread::sleep(Duration::from_millis(1500));
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)

@@ -8,7 +8,9 @@ authors = ["areadox"]
 [dependencies]
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "system_fonts", "persistence", "x11", "wayland"] }
 global-hotkey = "0.9.0"
+self-replace = "1.5.1"
 serde = { version = "1.0.229", features = ["derive"] }
+ureq = { version = "3.5.1", features = ["json"] }
 
 [profile.release]
 opt-level = 3
