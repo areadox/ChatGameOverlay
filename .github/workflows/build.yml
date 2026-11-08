@@ -1,7 +1,11 @@
 name: Build
 
-# Baut bei jedem Push die Programme (als Download unter „Actions“).
-# Ein GitHub-Release entsteht nur, wenn ein Tag wie v0.0.1 gepusht wird.
+# Baut bei jedem Push nach main die Programme (zum Download unter „Actions“).
+#
+# Ein GitHub-Release entsteht nur, wenn
+#   - die erste Zeile der Commit-Nachricht „Release vX.Y.Z“ lautet
+#     (muss zur Version in Cargo.toml passen; weitere Zeilen = Release-Text), oder
+#   - ein Tag wie v0.0.3 gepusht bzw. im Browser angelegt wird.
 on:
   push:
     branches: [main]
@@ -40,8 +44,48 @@ jobs:
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.head_commit.message, 'Release v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version prüfen
+        id: v
+        shell: bash
+        env:
+          HEAD_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Tag wurde von Hand angelegt – Release-Text nicht überschreiben
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            echo "notes=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          VER=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          TAG="v$VER"
+          MSG_TAG=$(printf '%s\n' "$HEAD_MSG" | head -1 | awk '{print $2}')
+          if [ "$MSG_TAG" != "$TAG" ]; then
+            echo "::error::Commit nennt $MSG_TAG, Cargo.toml hat aber $TAG"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "::error::$TAG gibt es schon"
+            exit 1
+          fi
+          # Release-Text: alles nach der ersten Zeile, ohne Co-Author-/Session-Zeilen
+          printf '%s\n' "$HEAD_MSG" | tail -n +2 | grep -v -E '^(Co-Authored-By|Claude-Session):' > release-notes.md || true
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "notes=release-notes.md" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
         with:
-          files: ${{ matrix.asset }}
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ChatGameOverlay ${{ steps.v.outputs.tag }}
+          body_path: ${{ steps.v.outputs.notes }}
+          files: dist/*

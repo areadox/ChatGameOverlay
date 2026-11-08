@@ -52,12 +52,14 @@ cargo build --release
 
 Die fertige Datei liegt dann unter `target/release/`.
 
-GitHub Actions baut bei jedem Push automatisch eine Windows- und eine Linux-Version (unter „Actions“ zum Download). Ein Release wird erst erstellt, wenn ein Versions-Tag gepusht wird:
+GitHub Actions baut bei jedem Push automatisch eine Windows- und eine Linux-Version (unter „Actions“ zum Download).
 
-```bash
-git tag v0.0.1
-git push origin v0.0.1
-```
+### Release erstellen
+
+Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
+
+- **Per Commit:** Version in `Cargo.toml` hochzählen und einen Commit nach `main` pushen, dessen erste Zeile `Release vX.Y.Z` lautet (passend zur Version). Die weiteren Zeilen der Commit-Nachricht werden zum Release-Text. Der Workflow baut, legt den Tag an und hängt die Dateien an.
+- **Per Tag:** im Browser unter *Releases → Draft a new release* einen neuen Tag wie `v0.0.3` anlegen oder ihn per `git push origin v0.0.3` hochladen.
 
 ## Bekannte Grenzen (v0.0.1)
 
