@@ -543,6 +543,8 @@ fn main() -> eframe::Result {
             .with_always_on_top()
             .with_icon(Arc::new(icon())),
         persist_window: true,
+        // OpenGL-Renderer: unter Windows zuverlässig transparent (wgpu/DirectX nicht)
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(

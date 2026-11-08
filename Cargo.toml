@@ -1,12 +1,12 @@
 [package]
 name = "chat-game-overlay"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Twitch-Chat als transparentes Overlay immer im Vordergrund über dem Spiel"
 authors = ["areadox"]
 
 [dependencies]
-eframe = { version = "0.37.0", features = ["persistence"] }
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "system_fonts", "persistence", "x11", "wayland"] }
 global-hotkey = "0.9.0"
 serde = { version = "1.0.229", features = ["derive"] }
 

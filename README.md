@@ -58,3 +58,11 @@ git push origin v0.0.1
 - Emotes werden als Text angezeigt (z. B. `Kappa`), nicht als Bild.
 - Die Hotkeys sind noch fest eingestellt.
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab.
+
+## Änderungen
+
+### 0.0.2
+- Fenster ist unter Windows jetzt wirklich durchsichtig: Darstellung über OpenGL statt DirectX/Vulkan, da diese unter Windows keine transparenten Fenster unterstützen.
+
+### 0.0.1
+- Erste Version.
