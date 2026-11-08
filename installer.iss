@@ -32,6 +32,8 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Sprache des Installers richtet sich nach der Windows-Sprache
+ShowLanguageDialog=auto
 CloseApplications=yes
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
@@ -39,24 +41,39 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[CustomMessages]
+german.DesktopIcon=Verknüpfung auf dem Desktop anlegen
+english.DesktopIcon=Create a desktop shortcut
+german.ExtraIcons=Zusätzliche Verknüpfungen:
+english.ExtraIcons=Additional shortcuts:
+german.Autostart=Mit Windows starten
+english.Autostart=Start with Windows
+german.StartGroup=Start:
+english.StartGroup=Startup:
+german.Uninstall=deinstallieren
+english.Uninstall=uninstall
+german.LaunchNow=jetzt starten
+english.LaunchNow=launch now
 
 [Tasks]
-Name: "desktopicon"; Description: "Verknüpfung auf dem Desktop anlegen"; GroupDescription: "Zusätzliche Verknüpfungen:"
-Name: "autostart"; Description: "Mit Windows starten"; GroupDescription: "Start:"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:ExtraIcons}"
+Name: "autostart"; Description: "{cm:Autostart}"; GroupDescription: "{cm:StartGroup}"; Flags: unchecked
 
 [Files]
 Source: "dist\{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"
-Name: "{group}\{#MyAppName} deinstallieren"; Filename: "{uninstallexe}"
+Name: "{group}\{#MyAppName} {cm:Uninstall}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExe}"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-Filename: "{app}\{#MyAppExe}"; Description: "{#MyAppName} jetzt starten"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExe}"; Description: "{#MyAppName} {cm:LaunchNow}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Reste eines abgebrochenen Updates

@@ -6,6 +6,8 @@ use std::thread;
 use eframe::egui::Context;
 use serde::Deserialize;
 
+use crate::i18n::Lang;
+
 const LATEST_URL: &str = "https://api.github.com/repos/areadox/ChatGameOverlay/releases/latest";
 pub const RELEASES_PAGE: &str = "https://github.com/areadox/ChatGameOverlay/releases";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
@@ -53,7 +55,7 @@ fn set(state: &Shared, ctx: &Context, s: UpdateState) {
 }
 
 /// Fragt GitHub im Hintergrund nach dem neuesten Release.
-pub fn check(state: Shared, ctx: Context) {
+pub fn check(state: Shared, ctx: Context, l: Lang) {
     set(&state, &ctx, UpdateState::Checking);
     thread::spawn(move || {
         let result = (|| -> Result<UpdateState, String> {
@@ -61,10 +63,10 @@ pub fn check(state: Shared, ctx: Context) {
                 .header("User-Agent", &user_agent())
                 .header("Accept", "application/vnd.github+json")
                 .call()
-                .map_err(|e| format!("GitHub nicht erreichbar: {e}"))?
+                .map_err(|e| format!("{} {e}", l.t("GitHub nicht erreichbar:", "Cannot reach GitHub:")))?
                 .body_mut()
                 .read_json()
-                .map_err(|e| format!("Antwort unlesbar: {e}"))?;
+                .map_err(|e| format!("{} {e}", l.t("Antwort unlesbar:", "Unreadable response:")))?;
             let version = release.tag_name.trim_start_matches('v').to_string();
             if !is_newer(&version, CURRENT) {
                 return Ok(UpdateState::UpToDate);
@@ -73,7 +75,9 @@ pub fn check(state: Shared, ctx: Context) {
                 .assets
                 .into_iter()
                 .find(|a| a.name == ASSET_NAME)
-                .ok_or_else(|| format!("Version {version} hat (noch) keine Datei {ASSET_NAME}"))?;
+                .ok_or_else(|| l.t("Version {v} hat (noch) keine Datei {f}", "Version {v} has no file {f} (yet)")
+                    .replace("{v}", &version)
+                    .replace("{f}", ASSET_NAME))?;
             Ok(UpdateState::Available { version, url: asset.browser_download_url })
         })();
         set(&state, &ctx, result.unwrap_or_else(UpdateState::Failed));
@@ -81,33 +85,33 @@ pub fn check(state: Shared, ctx: Context) {
 }
 
 /// Lädt die neue Version herunter und ersetzt die laufende Programmdatei.
-pub fn install(state: Shared, ctx: Context, version: String, url: String) {
+pub fn install(state: Shared, ctx: Context, version: String, url: String, l: Lang) {
     set(&state, &ctx, UpdateState::Downloading { version: version.clone() });
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
             let data = ureq::get(&url)
                 .header("User-Agent", &user_agent())
                 .call()
-                .map_err(|e| format!("Download fehlgeschlagen: {e}"))?
+                .map_err(|e| format!("{} {e}", l.t("Download fehlgeschlagen:", "Download failed:")))?
                 .body_mut()
                 .with_config()
                 .limit(200 * 1024 * 1024)
                 .read_to_vec()
-                .map_err(|e| format!("Download abgebrochen: {e}"))?;
+                .map_err(|e| format!("{} {e}", l.t("Download abgebrochen:", "Download aborted:")))?;
             if data.len() < 100 * 1024 {
-                return Err("Heruntergeladene Datei ist unvollständig".into());
+                return Err(l.t("Heruntergeladene Datei ist unvollständig", "Downloaded file is incomplete").into());
             }
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-            let dir = exe.parent().ok_or("Programmordner nicht gefunden")?;
+            let dir = exe.parent().ok_or(l.t("Programmordner nicht gefunden", "Program folder not found"))?;
             let tmp = dir.join(".ChatGameOverlay-update.tmp");
             std::fs::write(&tmp, &data)
-                .map_err(|e| format!("Kann nicht in den Programmordner schreiben: {e}"))?;
+                .map_err(|e| format!("{} {e}", l.t("Kann nicht in den Programmordner schreiben:", "Cannot write to the program folder:")))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
             }
-            let r = self_replace::self_replace(&tmp).map_err(|e| format!("Ersetzen fehlgeschlagen: {e}"));
+            let r = self_replace::self_replace(&tmp).map_err(|e| format!("{} {e}", l.t("Ersetzen fehlgeschlagen:", "Replacing failed:")));
             let _ = std::fs::remove_file(&tmp);
             r
         })();

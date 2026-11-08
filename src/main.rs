@@ -1,6 +1,7 @@
 // Unter Windows kein Konsolenfenster öffnen
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod i18n;
 mod irc;
 mod tray;
 mod update;
@@ -19,12 +20,11 @@ use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use serde::{Deserialize, Serialize};
 
+use i18n::Lang;
 use irc::{Badge, ChatEvent, ChatMessage, Status};
 use update::UpdateState;
 
 const APP_NAME: &str = "ChatGameOverlay";
-const HOTKEY_LOCK_TEXT: &str = "Strg + Umschalt + F9";
-const HOTKEY_HIDE_TEXT: &str = "Strg + Umschalt + F10";
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -42,6 +42,8 @@ struct Config {
     start_locked: bool,
     /// Beim Start auf GitHub nach neuer Version suchen
     auto_update_check: bool,
+    /// Sprache der Oberfläche
+    language: Lang,
 }
 
 impl Default for Config {
@@ -56,6 +58,7 @@ impl Default for Config {
             auto_hide_bg: true,
             start_locked: false,
             auto_update_check: true,
+            language: Lang::detect(),
         }
     }
 }
@@ -103,11 +106,12 @@ impl OverlayApp {
         let (manager, hotkey_error) = match GlobalHotKeyManager::new() {
             Ok(m) => match m.register_all(&[lock, hide]) {
                 Ok(()) => (Some(m), None),
-                Err(e) => (Some(m), Some(format!("Hotkeys nicht verfügbar: {e}"))),
+                Err(e) => (Some(m), Some(e.to_string())),
             },
-            Err(e) => (None, Some(format!("Hotkeys nicht verfügbar: {e}"))),
+            Err(e) => (None, Some(e.to_string())),
         };
 
+        let cfg_lang = cfg.language;
         let (tx, rx) = mpsc::channel();
         let mut app = Self {
             channel_input: cfg.channel.clone(),
@@ -127,7 +131,7 @@ impl OverlayApp {
             hk_hide: hide.id(),
             hotkey_error,
             update: Arc::new(std::sync::Mutex::new(UpdateState::Idle)),
-            tray: tray::Tray::new(icon().rgba, 32),
+            tray: tray::Tray::new(icon().rgba, 32, cfg_lang),
             settings_applied: None,
             settings_cmd_at: Instant::now(),
         };
@@ -135,7 +139,7 @@ impl OverlayApp {
             app.connect(&cc.egui_ctx);
         }
         if app.cfg.auto_update_check {
-            update::check(app.update.clone(), cc.egui_ctx.clone());
+            update::check(app.update.clone(), cc.egui_ctx.clone(), app.cfg.language);
         }
         app
     }
@@ -209,16 +213,24 @@ impl OverlayApp {
     }
 
     fn restart_after_update(&mut self, ctx: &egui::Context) {
+        let l = self.cfg.language;
         if update::restart() {
             ctx.send_viewport_cmd(ViewportCommand::Close);
         } else if let Ok(mut g) = self.update.lock() {
-            *g = UpdateState::Failed("Neustart fehlgeschlagen – bitte Programm selbst neu starten".into());
+            *g = UpdateState::Failed(
+                l.t(
+                    "Neustart fehlgeschlagen – bitte Programm selbst neu starten",
+                    "Restart failed – please start the program again yourself",
+                )
+                .into(),
+            );
         }
     }
 
     fn update_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Updates:").strong());
-        ui.label(format!("Installierte Version: {}", update::CURRENT));
+        let l = self.cfg.language;
+        ui.label(egui::RichText::new(l.t("Updates:", "Updates:")).strong());
+        ui.label(format!("{} {}", l.t("Installierte Version:", "Installed version:"), update::CURRENT));
         let ok = Color32::from_rgb(60, 200, 90);
         let warn = Color32::from_rgb(230, 120, 80);
         let ctx = ui.ctx().clone();
@@ -227,30 +239,30 @@ impl OverlayApp {
             UpdateState::Checking => {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label("Suche nach Updates …");
+                    ui.label(l.t("Suche nach Updates …", "Checking for updates …"));
                 });
             }
             UpdateState::UpToDate => {
-                ui.colored_label(ok, "✔ Du hast die neueste Version.");
+                ui.colored_label(ok, l.t("✔ Du hast die neueste Version.", "✔ You have the latest version."));
             }
             UpdateState::Available { version, url } => {
-                ui.colored_label(ok, format!("Neue Version {version} verfügbar."));
+                ui.colored_label(ok, l.t("Neue Version {v} verfügbar.", "New version {v} available.").replace("{v}", &version));
                 ui.horizontal(|ui| {
-                    if ui.button("Jetzt aktualisieren").clicked() {
-                        update::install(self.update.clone(), ctx.clone(), version.clone(), url.clone());
+                    if ui.button(l.t("Jetzt aktualisieren", "Update now")).clicked() {
+                        update::install(self.update.clone(), ctx.clone(), version.clone(), url.clone(), l);
                     }
-                    ui.hyperlink_to("Änderungen ansehen", update::RELEASES_PAGE);
+                    ui.hyperlink_to(l.t("Änderungen ansehen", "See changes"), update::RELEASES_PAGE);
                 });
             }
             UpdateState::Downloading { version } => {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label(format!("Lade Version {version} herunter …"));
+                    ui.label(l.t("Lade Version {v} herunter …", "Downloading version {v} …").replace("{v}", &version));
                 });
             }
             UpdateState::Installed { version } => {
-                ui.colored_label(ok, format!("Version {version} ist installiert."));
-                if ui.button("Jetzt neu starten").clicked() {
+                ui.colored_label(ok, l.t("Version {v} ist installiert.", "Version {v} is installed.").replace("{v}", &version));
+                if ui.button(l.t("Jetzt neu starten", "Restart now")).clicked() {
                     self.restart_after_update(&ctx);
                 }
             }
@@ -263,11 +275,11 @@ impl OverlayApp {
             UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Installed { .. }
         );
         ui.horizontal(|ui| {
-            if ui.add_enabled(!busy, egui::Button::new("Nach Updates suchen")).clicked() {
-                update::check(self.update.clone(), ctx.clone());
+            if ui.add_enabled(!busy, egui::Button::new(l.t("Nach Updates suchen", "Check for updates"))).clicked() {
+                update::check(self.update.clone(), ctx.clone(), l);
             }
         });
-        ui.checkbox(&mut self.cfg.auto_update_check, "Beim Start automatisch nach Updates suchen");
+        ui.checkbox(&mut self.cfg.auto_update_check, l.t("Beim Start automatisch nach Updates suchen", "Check for updates on startup"));
     }
 
     fn toggle_lock(&mut self) {
@@ -288,7 +300,7 @@ impl OverlayApp {
             }
         }
         if let Some(tray) = &self.tray {
-            tray.sync(self.locked, self.hidden);
+            tray.sync(self.locked, self.hidden, self.cfg.language);
         }
     }
 
@@ -336,11 +348,12 @@ impl OverlayApp {
     }
 
     fn title_bar(&mut self, ui: &mut egui::Ui) {
+        let l = self.cfg.language;
         ui.horizontal_centered(|ui| {
             let (dot, status_text) = match self.status {
-                Status::Connected => (Color32::from_rgb(60, 200, 90), "verbunden"),
-                Status::Connecting => (Color32::from_rgb(230, 180, 40), "verbinde …"),
-                Status::Disconnected => (Color32::from_rgb(200, 60, 60), "getrennt"),
+                Status::Connected => (Color32::from_rgb(60, 200, 90), l.t("verbunden", "connected")),
+                Status::Connecting => (Color32::from_rgb(230, 180, 40), l.t("verbinde …", "connecting …")),
+                Status::Disconnected => (Color32::from_rgb(200, 60, 60), l.t("getrennt", "disconnected")),
             };
             let title = if self.connected_channel.is_empty() {
                 "✥ ChatGameOverlay".to_string()
@@ -353,7 +366,7 @@ impl OverlayApp {
                 .on_hover_text(status_text);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("✖").on_hover_text("Beenden").clicked() {
+                if ui.button("✖").on_hover_text(l.t("Beenden", "Quit")).clicked() {
                     ui.ctx().send_viewport_cmd(ViewportCommand::Close);
                 }
                 let update_color = Color32::from_rgb(60, 200, 90);
@@ -361,7 +374,7 @@ impl OverlayApp {
                     UpdateState::Available { version, .. } => {
                         if ui
                             .button(egui::RichText::new("⬆").color(update_color))
-                            .on_hover_text(format!("Version {version} verfügbar – in den Einstellungen installieren"))
+                            .on_hover_text(l.t("Version {v} verfügbar – in den Einstellungen installieren", "Version {v} available – install it in the settings").replace("{v}", &version))
                             .clicked()
                         {
                             self.show_settings = true;
@@ -371,7 +384,7 @@ impl OverlayApp {
                     UpdateState::Installed { version } => {
                         if ui
                             .button(egui::RichText::new("⟳").color(update_color))
-                            .on_hover_text(format!("Version {version} installiert – jetzt neu starten"))
+                            .on_hover_text(l.t("Version {v} installiert – jetzt neu starten", "Version {v} installed – restart now").replace("{v}", &version))
                             .clicked()
                         {
                             self.restart_after_update(ui.ctx());
@@ -382,7 +395,12 @@ impl OverlayApp {
                 if ui
                     .button("🔒")
                     .on_hover_text(format!(
-                        "Fixieren: Klicks gehen ins Spiel durch.\nZurück mit {HOTKEY_LOCK_TEXT}"
+                        "{}{}",
+                        l.t(
+                            "Fixieren: Klicks gehen ins Spiel durch.\nZurück mit ",
+                            "Lock: clicks go through to the game.\nUnlock with "
+                        ),
+                        l.hotkey_lock()
                     ))
                     .clicked()
                 {
@@ -390,7 +408,7 @@ impl OverlayApp {
                 }
                 if ui
                     .selectable_label(self.show_settings, "⚙")
-                    .on_hover_text("Einstellungen")
+                    .on_hover_text(l.t("Einstellungen", "Settings"))
                     .clicked()
                 {
                     self.show_settings = !self.show_settings;
@@ -400,22 +418,30 @@ impl OverlayApp {
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
+        let l = self.cfg.language;
         egui::ScrollArea::vertical()
             .id_salt("settings")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.heading("Einstellungen");
+                ui.horizontal(|ui| {
+                    ui.heading(l.t("Einstellungen", "Settings"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.selectable_value(&mut self.cfg.language, Lang::En, "English");
+                        ui.selectable_value(&mut self.cfg.language, Lang::De, "Deutsch");
+                        ui.label("🌐");
+                    });
+                });
                 ui.add_space(4.0);
 
-                ui.label("Twitch-Kanal:");
+                ui.label(l.t("Twitch-Kanal:", "Twitch channel:"));
                 ui.horizontal(|ui| {
                     let edit = ui.add(
                         egui::TextEdit::singleline(&mut self.channel_input)
-                            .hint_text("z. B. areadox")
+                            .hint_text(l.t("z. B. areadox", "e.g. areadox"))
                             .desired_width(160.0),
                     );
                     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.button("Verbinden").clicked() || enter {
+                    if ui.button(l.t("Verbinden", "Connect")).clicked() || enter {
                         self.cfg.channel = self.channel_input.clone();
                         let ctx = ui.ctx().clone();
                         self.connect(&ctx);
@@ -424,10 +450,10 @@ impl OverlayApp {
                 });
                 ui.add_space(6.0);
 
-                ui.add(egui::Slider::new(&mut self.cfg.font_size, 10.0..=40.0).text("Schriftgröße"));
+                ui.add(egui::Slider::new(&mut self.cfg.font_size, 10.0..=40.0).text(l.t("Schriftgröße", "Font size")));
                 let mut pct = (self.cfg.bg_opacity * 100.0).round();
                 if ui
-                    .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %").text("Hintergrund"))
+                    .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %").text(l.t("Hintergrund", "Background")))
                     .changed()
                 {
                     self.cfg.bg_opacity = pct / 100.0;
@@ -435,46 +461,58 @@ impl OverlayApp {
                 ui.add(
                     egui::Slider::new(&mut self.cfg.fade_seconds, 0..=300)
                         .suffix(" s")
-                        .text("Ausblenden nach"),
+                        .text(l.t("Ausblenden nach", "Fade out after")),
                 )
-                .on_hover_text("Im fixierten Modus verschwinden Nachrichten nach dieser Zeit. 0 = nie.");
-                ui.add(egui::Slider::new(&mut self.cfg.max_messages, 20..=500).text("Max. Nachrichten"));
-                ui.checkbox(&mut self.cfg.show_badges, "Abzeichen (Mod, VIP, Sub) anzeigen");
+                .on_hover_text(l.t(
+                    "Im fixierten Modus verschwinden Nachrichten nach dieser Zeit. 0 = nie.",
+                    "In locked mode, messages disappear after this time. 0 = never.",
+                ));
+                ui.add(egui::Slider::new(&mut self.cfg.max_messages, 20..=500).text(l.t("Max. Nachrichten", "Max. messages")));
+                ui.checkbox(&mut self.cfg.show_badges, l.t("Abzeichen (Mod, VIP, Sub) anzeigen", "Show badges (mod, VIP, sub)"));
                 ui.checkbox(
                     &mut self.cfg.auto_hide_bg,
-                    "Hintergrund ausblenden, wenn keine Nachricht sichtbar ist",
+                    l.t(
+                        "Hintergrund ausblenden, wenn keine Nachricht sichtbar ist",
+                        "Hide background when no message is visible",
+                    ),
                 );
-                ui.checkbox(&mut self.cfg.start_locked, "Beim Start gleich fixieren");
+                ui.checkbox(&mut self.cfg.start_locked, l.t("Beim Start gleich fixieren", "Start locked"));
 
                 ui.add_space(8.0);
                 ui.separator();
                 self.update_section(ui);
                 ui.separator();
-                ui.label(egui::RichText::new("Hotkeys (auch im Spiel):").strong());
-                ui.label(format!("{HOTKEY_LOCK_TEXT}: fixieren / bearbeiten"));
-                ui.label(format!("{HOTKEY_HIDE_TEXT}: ein- / ausblenden"));
+                ui.label(egui::RichText::new(l.t("Hotkeys (auch im Spiel):", "Hotkeys (work in-game too):")).strong());
+                ui.label(format!("{}: {}", l.hotkey_lock(), l.t("fixieren / bearbeiten", "lock / edit")));
+                ui.label(format!("{}: {}", l.hotkey_hide(), l.t("ein- / ausblenden", "show / hide")));
                 if let Some(e) = &self.hotkey_error {
-                    ui.colored_label(Color32::from_rgb(230, 120, 80), e);
+                    ui.colored_label(
+                        Color32::from_rgb(230, 120, 80),
+                        format!("{} {e}", l.t("Hotkeys nicht verfügbar:", "Hotkeys unavailable:")),
+                    );
                 }
                 ui.add_space(4.0);
                 ui.label(
-                    egui::RichText::new(
+                    egui::RichText::new(l.t(
                         "Wichtig: Das Spiel muss im Modus „Randloses Fenster“ \
                          (Borderless / Vollbild-Fenster) laufen. Im exklusiven Vollbild \
                          kann kein Programm darüber angezeigt werden.",
-                    )
+                        "Important: the game must run in “borderless window” \
+                         (windowed fullscreen) mode. Nothing can be shown on top of \
+                         exclusive fullscreen.",
+                    ))
                     .small()
                     .weak(),
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Chat leeren").clicked() {
+                    if ui.button(l.t("Chat leeren", "Clear chat")).clicked() {
                         self.messages.clear();
                     }
-                    if ui.button("Schließen").clicked() {
+                    if ui.button(l.t("Schließen", "Close")).clicked() {
                         self.show_settings = false;
                     }
-                    if ui.button("Programm beenden").clicked() {
+                    if ui.button(l.t("Programm beenden", "Quit program")).clicked() {
                         ui.ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
                     }
                 });
@@ -482,6 +520,7 @@ impl OverlayApp {
     }
 
     fn chat(&self, ui: &mut egui::Ui, edit_mode: bool) {
+        let l = self.cfg.language;
         let size = self.cfg.font_size;
         egui::ScrollArea::vertical()
             .id_salt("chat")
@@ -497,9 +536,9 @@ impl OverlayApp {
                 let width = ui.available_width();
                 if self.messages.is_empty() {
                     let hint = if self.connected_channel.is_empty() {
-                        "Kein Kanal eingestellt – ⚙ öffnen."
+                        l.t("Kein Kanal eingestellt – ⚙ öffnen.", "No channel set – open ⚙.")
                     } else {
-                        "Warte auf Nachrichten …"
+                        l.t("Warte auf Nachrichten …", "Waiting for messages …")
                     };
                     if edit_mode {
                         ui.label(egui::RichText::new(hint).weak());

@@ -1,5 +1,7 @@
 # ChatGameOverlay
 
+🇩🇪 Deutsch · [🇬🇧 English](README.en.md)
+
 Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vordergrund** – direkt über dem Spiel, das gerade läuft. Geschrieben in Rust, mit Installer oder als einzelne `.exe` ohne Installation, kein Twitch-Login nötig.
 
 ## Funktionen
@@ -16,6 +18,7 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 - Fensterposition, Größe und Einstellungen werden gespeichert
 - Installer mit Startmenü-Eintrag, optionaler Desktop-Verknüpfung und Autostart
 - Eingebaute Update-Funktion
+- Oberfläche auf Deutsch oder Englisch (beim ersten Start nach Windows-Sprache, umschaltbar in den Einstellungen)
 
 ## Installation
 
@@ -91,14 +94,19 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 - **Per Commit:** Version in `Cargo.toml` hochzählen und einen Commit nach `main` pushen, dessen erste Zeile `Release vX.Y.Z` lautet (passend zur Version). Die weiteren Zeilen der Commit-Nachricht werden zum Release-Text. Der Workflow baut, legt den Tag an und hängt die Dateien an.
 - **Per Tag:** im Browser unter *Releases → Draft a new release* einen neuen Tag wie `v0.0.3` anlegen oder ihn per `git push origin v0.0.3` hochladen.
 
-## Bekannte Grenzen (v0.0.1)
+## Bekannte Grenzen
 
 - Emotes werden als Text angezeigt (z. B. `Kappa`), nicht als Bild.
 - Die Hotkeys sind noch fest eingestellt.
-- Version 0.0.1 hat noch keine Update-Funktion – einmal von Hand auf 0.0.2 wechseln, danach geht es automatisch.
+- Version 0.0.1 hat noch keine Update-Funktion – einmal von Hand auf eine neuere Version wechseln, danach geht es automatisch.
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- Sprachauswahl Deutsch / Englisch für Programm, Tray-Menü und Update-Meldungen; beim ersten Start wird die Windows-Sprache übernommen.
+- Installer auf Deutsch und Englisch.
+- README auf Englisch.
 
 ### 0.0.4
 - Tray-Symbol mit Menü (Einstellungen, Fixiert, Ausgeblendet, Beenden); Linksklick öffnet die Einstellungen.

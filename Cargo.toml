@@ -10,6 +10,7 @@ eframe = { version = "0.37.0", default-features = false, features = ["glow", "de
 global-hotkey = "0.9.0"
 self-replace = "1.5.1"
 serde = { version = "1.0.229", features = ["derive"] }
+sys-locale = "0.3.2"
 ureq = { version = "3.5.1", features = ["json"] }
 
 [profile.release]

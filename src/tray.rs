@@ -11,26 +11,30 @@ pub enum TrayAction {
 #[cfg(windows)]
 mod imp {
     use super::TrayAction;
+    use crate::i18n::Lang;
     use std::cell::Cell;
     use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
     pub struct Tray {
         _icon: TrayIcon,
+        settings_item: MenuItem,
+        quit_item: MenuItem,
         settings: MenuId,
         quit: MenuId,
         lock: CheckMenuItem,
         hide: CheckMenuItem,
-        last: Cell<Option<(bool, bool)>>,
+        last: Cell<Option<(bool, bool, Lang)>>,
     }
 
     impl Tray {
-        pub fn new(rgba: Vec<u8>, size: u32) -> Option<Self> {
+        pub fn new(rgba: Vec<u8>, size: u32, lang: Lang) -> Option<Self> {
             let menu = Menu::new();
-            let settings = MenuItem::new("Einstellungen öffnen", true, None);
-            let lock = CheckMenuItem::new("Fixiert (Strg+Umschalt+F9)", true, false, None);
-            let hide = CheckMenuItem::new("Ausgeblendet (Strg+Umschalt+F10)", true, false, None);
-            let quit = MenuItem::new("Beenden", true, None);
+            let (t_settings, t_lock, t_hide, t_quit) = texts(lang);
+            let settings = MenuItem::new(t_settings, true, None);
+            let lock = CheckMenuItem::new(t_lock, true, false, None);
+            let hide = CheckMenuItem::new(t_hide, true, false, None);
+            let quit = MenuItem::new(t_quit, true, None);
             menu.append(&settings).ok()?;
             menu.append(&PredefinedMenuItem::separator()).ok()?;
             menu.append(&lock).ok()?;
@@ -50,6 +54,8 @@ mod imp {
                 _icon: tray,
                 settings: settings.id().clone(),
                 quit: quit.id().clone(),
+                settings_item: settings,
+                quit_item: quit,
                 lock,
                 hide,
                 last: Cell::new(None),
@@ -83,14 +89,32 @@ mod imp {
             out
         }
 
-        /// Häkchen im Menü an den aktuellen Zustand anpassen
-        pub fn sync(&self, locked: bool, hidden: bool) {
-            if self.last.get() != Some((locked, hidden)) {
-                self.lock.set_checked(locked);
-                self.hide.set_checked(hidden);
-                self.last.set(Some((locked, hidden)));
+        /// Häkchen und Sprache im Menü an den aktuellen Zustand anpassen
+        pub fn sync(&self, locked: bool, hidden: bool, lang: Lang) {
+            let prev = self.last.get();
+            if prev == Some((locked, hidden, lang)) {
+                return;
             }
+            if prev.map(|p| p.2) != Some(lang) {
+                let (t_settings, t_lock, t_hide, t_quit) = texts(lang);
+                self.settings_item.set_text(t_settings);
+                self.lock.set_text(t_lock);
+                self.hide.set_text(t_hide);
+                self.quit_item.set_text(t_quit);
+            }
+            self.lock.set_checked(locked);
+            self.hide.set_checked(hidden);
+            self.last.set(Some((locked, hidden, lang)));
         }
+    }
+
+    fn texts(l: Lang) -> (&'static str, &'static str, &'static str, &'static str) {
+        (
+            l.t("Einstellungen öffnen", "Open settings"),
+            l.t("Fixiert (Strg+Umschalt+F9)", "Locked (Ctrl+Shift+F9)"),
+            l.t("Ausgeblendet (Strg+Umschalt+F10)", "Hidden (Ctrl+Shift+F10)"),
+            l.t("Beenden", "Quit"),
+        )
     }
 }
 
@@ -102,13 +126,13 @@ mod imp {
     pub struct Tray;
 
     impl Tray {
-        pub fn new(_rgba: Vec<u8>, _size: u32) -> Option<Self> {
+        pub fn new(_rgba: Vec<u8>, _size: u32, _lang: crate::i18n::Lang) -> Option<Self> {
             None
         }
         pub fn poll(&self) -> Vec<TrayAction> {
             Vec::new()
         }
-        pub fn sync(&self, _locked: bool, _hidden: bool) {}
+        pub fn sync(&self, _locked: bool, _hidden: bool, _lang: crate::i18n::Lang) {}
     }
 }
 

@@ -320,6 +320,7 @@ dependencies = [
  "global-hotkey",
  "self-replace",
  "serde",
+ "sys-locale",
  "tray-icon",
  "ureq",
  "winresource",
