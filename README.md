@@ -12,6 +12,7 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 - Gelöschte Nachrichten, Timeouts und Banns verschwinden auch im Overlay
 - Einstellbar: Schriftgröße, Deckkraft des Hintergrunds, automatisches Ausblenden alter Nachrichten
 - Einstellungen in einem eigenen, normalen Fenster – das Chatfenster zeigt dabei live die eingestellte Transparenz
+- Symbol im Infobereich (Tray) mit Menü; Einstellungen auch über die Taskleiste erreichbar
 - Fensterposition, Größe und Einstellungen werden gespeichert
 - Installer mit Startmenü-Eintrag, optionaler Desktop-Verknüpfung und Autostart
 - Eingebaute Update-Funktion
@@ -36,6 +37,17 @@ Da die Dateien nicht digital signiert sind, warnt Windows SmartScreen beim erste
 |---|---|
 | Strg + Umschalt + F9 | Fixieren ⇄ Bearbeiten (verschieben, Einstellungen) |
 | Strg + Umschalt + F10 | Overlay ein- / ausblenden |
+
+### Taskleiste und Tray
+
+Das Chatfenster selbst erscheint nicht in der Taskleiste. Dort steht stattdessen **ChatGameOverlay** für das Einstellungsfenster: ein Klick darauf öffnet die Einstellungen, das **✖** des Einstellungsfensters legt es wieder in die Taskleiste zurück, ohne das Programm zu beenden.
+
+Im Infobereich neben der Uhr sitzt das Tray-Symbol:
+
+- **Linksklick:** Einstellungen öffnen
+- **Rechtsklick:** Menü mit *Einstellungen öffnen*, *Fixiert*, *Ausgeblendet* und *Beenden*
+
+Beenden lässt sich das Programm über das Tray-Menü, den Knopf **Programm beenden** in den Einstellungen oder das **✖** in der oberen Leiste des Chatfensters.
 
 ### Wichtig: Anzeigemodus des Spiels
 
@@ -84,9 +96,14 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 - Emotes werden als Text angezeigt (z. B. `Kappa`), nicht als Bild.
 - Die Hotkeys sind noch fest eingestellt.
 - Version 0.0.1 hat noch keine Update-Funktion – einmal von Hand auf 0.0.2 wechseln, danach geht es automatisch.
-- Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab.
+- Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- Tray-Symbol mit Menü (Einstellungen, Fixiert, Ausgeblendet, Beenden); Linksklick öffnet die Einstellungen.
+- Einstellungsfenster dauerhaft in der Taskleiste, Schließen legt es dort ab; das Chatfenster erscheint nicht mehr in der Taskleiste.
+- Knopf „Programm beenden“ in den Einstellungen.
 
 ### 0.0.3
 - Das Chatfenster lässt sich an der ganzen oberen Leiste verschieben; die Leiste ist nicht mehr durchsichtig.

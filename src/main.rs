@@ -2,13 +2,14 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod irc;
+mod tray;
 mod update;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Color32, CornerRadius, CursorIcon, FontId, Rect, ResizeDirection, Sense,
@@ -82,6 +83,11 @@ struct OverlayApp {
     hotkey_error: Option<String>,
 
     update: update::Shared,
+
+    tray: Option<tray::Tray>,
+    /// zuletzt an das Einstellungsfenster geschickter Zustand (true = offen)
+    settings_applied: Option<bool>,
+    settings_cmd_at: Instant,
 }
 
 impl OverlayApp {
@@ -121,6 +127,9 @@ impl OverlayApp {
             hk_hide: hide.id(),
             hotkey_error,
             update: Arc::new(std::sync::Mutex::new(UpdateState::Idle)),
+            tray: tray::Tray::new(icon().rgba, 32),
+            settings_applied: None,
+            settings_cmd_at: Instant::now(),
         };
         if !app.cfg.channel.trim().is_empty() {
             app.connect(&cc.egui_ctx);
@@ -171,11 +180,7 @@ impl OverlayApp {
                 continue;
             }
             if ev.id == self.hk_lock {
-                self.hidden = false;
-                self.locked = !self.locked;
-                if self.locked {
-                    self.show_settings = false;
-                }
+                self.toggle_lock();
             } else if ev.id == self.hk_hide {
                 self.hidden = !self.hidden;
             }
@@ -265,25 +270,69 @@ impl OverlayApp {
         ui.checkbox(&mut self.cfg.auto_update_check, "Beim Start automatisch nach Updates suchen");
     }
 
-    /// Einstellungen in einem eigenen, normalen (nicht durchsichtigen) Fenster
+    fn toggle_lock(&mut self) {
+        self.hidden = false;
+        self.locked = !self.locked;
+    }
+
+    fn handle_tray(&mut self, ctx: &egui::Context) {
+        let Some(tray) = &self.tray else { return };
+        for action in tray.poll() {
+            match action {
+                tray::TrayAction::OpenSettings => self.show_settings = true,
+                tray::TrayAction::ToggleLock => self.toggle_lock(),
+                tray::TrayAction::ToggleHide => self.hidden = !self.hidden,
+                tray::TrayAction::Quit => {
+                    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close)
+                }
+            }
+        }
+        if let Some(tray) = &self.tray {
+            tray.sync(self.locked, self.hidden);
+        }
+    }
+
+    /// Einstellungen in einem eigenen, normalen (nicht durchsichtigen) Fenster.
+    /// Das Fenster bleibt immer bestehen und hat den Eintrag in der Taskleiste;
+    /// „geschlossen“ heißt minimiert – ein Klick in der Taskleiste öffnet es wieder.
     fn settings_window(&mut self, ctx: &egui::Context) {
+        let id = egui::ViewportId::from_hash_of("einstellungen");
         let builder = egui::ViewportBuilder::default()
-            .with_title("ChatGameOverlay – Einstellungen")
+            .with_title("ChatGameOverlay")
+            .with_app_id("chat-game-overlay-settings")
             .with_inner_size([380.0, 600.0])
             .with_min_inner_size([300.0, 300.0])
             .with_always_on_top()
             .with_icon(Arc::new(icon()));
-        ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of("einstellungen"),
-            builder,
-            |ui, _class| {
-                ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
-                egui::Frame::new().inner_margin(12).show(ui, |ui| self.settings(ui));
-                if ui.ctx().input(|i| i.viewport().close_requested()) {
-                    self.show_settings = false;
+
+        // gewünschten Zustand an das Fenster schicken
+        if self.settings_applied != Some(self.show_settings) {
+            ctx.send_viewport_cmd_to(id, ViewportCommand::Minimized(!self.show_settings));
+            if self.show_settings {
+                ctx.send_viewport_cmd_to(id, ViewportCommand::Focus);
+            }
+            self.settings_applied = Some(self.show_settings);
+            self.settings_cmd_at = Instant::now();
+        }
+
+        ctx.show_viewport_immediate(id, builder, |ui, _class| {
+            let info = ui.ctx().input(|i| i.viewport().clone());
+            if info.close_requested() {
+                // Schließen-Knopf: nicht beenden, sondern in die Taskleiste
+                ui.ctx().send_viewport_cmd(ViewportCommand::CancelClose);
+                self.show_settings = false;
+            } else if self.settings_cmd_at.elapsed() > Duration::from_millis(600) {
+                // vom Benutzer über die Taskleiste geöffnet oder minimiert
+                if let Some(min) = info.minimized
+                    && min == self.show_settings
+                {
+                    self.show_settings = !min;
+                    self.settings_applied = Some(self.show_settings);
                 }
-            },
-        );
+            }
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
+            egui::Frame::new().inner_margin(12).show(ui, |ui| self.settings(ui));
+        });
     }
 
     fn title_bar(&mut self, ui: &mut egui::Ui) {
@@ -338,7 +387,6 @@ impl OverlayApp {
                     .clicked()
                 {
                     self.locked = true;
-                    self.show_settings = false;
                 }
                 if ui
                     .selectable_label(self.show_settings, "⚙")
@@ -425,6 +473,9 @@ impl OverlayApp {
                     }
                     if ui.button("Schließen").clicked() {
                         self.show_settings = false;
+                    }
+                    if ui.button("Programm beenden").clicked() {
+                        ui.ctx().send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
                     }
                 });
             });
@@ -572,9 +623,8 @@ impl eframe::App for OverlayApp {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
             self.passthrough_applied = Some(passthrough);
         }
-        if self.show_settings {
-            self.settings_window(&ctx);
-        }
+        self.handle_tray(&ctx);
+        self.settings_window(&ctx);
         if self.hidden {
             return;
         }
@@ -684,6 +734,8 @@ fn main() -> eframe::Result {
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
+            // in der Taskleiste steht nur das Einstellungsfenster
+            .with_taskbar(false)
             .with_icon(Arc::new(icon())),
         persist_window: true,
         // OpenGL-Renderer: unter Windows zuverlässig transparent (wgpu/DirectX nicht)
