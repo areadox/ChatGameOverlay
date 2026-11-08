@@ -100,7 +100,7 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.4
 - Tray-Symbol mit Menü (Einstellungen, Fixiert, Ausgeblendet, Beenden); Linksklick öffnet die Einstellungen.
 - Einstellungsfenster dauerhaft in der Taskleiste, Schließen legt es dort ab; das Chatfenster erscheint nicht mehr in der Taskleiste.
 - Knopf „Programm beenden“ in den Einstellungen.
