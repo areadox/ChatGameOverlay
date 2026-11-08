@@ -44,6 +44,21 @@ jobs:
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
+      - name: Installer bauen
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/${{ matrix.file }} dist/ChatGameOverlay.exe
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$ISCC" ]; then choco install innosetup -y --no-progress; fi
+          VER=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          "$ISCC" "//DMyAppVersion=$VER" installer.iss
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: ChatGameOverlay-Setup.exe
+          path: dist/ChatGameOverlay-Setup.exe
 
   release:
     needs: build

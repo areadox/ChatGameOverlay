@@ -265,8 +265,29 @@ impl OverlayApp {
         ui.checkbox(&mut self.cfg.auto_update_check, "Beim Start automatisch nach Updates suchen");
     }
 
+    /// Einstellungen in einem eigenen, normalen (nicht durchsichtigen) Fenster
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        let builder = egui::ViewportBuilder::default()
+            .with_title("ChatGameOverlay – Einstellungen")
+            .with_inner_size([380.0, 600.0])
+            .with_min_inner_size([300.0, 300.0])
+            .with_always_on_top()
+            .with_icon(Arc::new(icon()));
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("einstellungen"),
+            builder,
+            |ui, _class| {
+                ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().panel_fill);
+                egui::Frame::new().inner_margin(12).show(ui, |ui| self.settings(ui));
+                if ui.ctx().input(|i| i.viewport().close_requested()) {
+                    self.show_settings = false;
+                }
+            },
+        );
+    }
+
     fn title_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_centered(|ui| {
             let (dot, status_text) = match self.status {
                 Status::Connected => (Color32::from_rgb(60, 200, 90), "verbunden"),
                 Status::Connecting => (Color32::from_rgb(230, 180, 40), "verbinde …"),
@@ -277,14 +298,10 @@ impl OverlayApp {
             } else {
                 format!("✥ #{}", self.connected_channel)
             };
-            let drag = ui
-                .add(egui::Label::new(egui::RichText::new(title).strong()).sense(Sense::drag()))
-                .on_hover_cursor(CursorIcon::Grab)
-                .on_hover_text("Hier ziehen, um das Fenster zu verschieben");
-            if drag.drag_started() {
-                ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
-            }
-            ui.colored_label(dot, "●").on_hover_text(status_text);
+            // Label ohne eigene Maus-Erkennung – Ziehen geht an die ganze Leiste durch
+            ui.add(egui::Label::new(egui::RichText::new(title).strong()).selectable(false));
+            ui.add(egui::Label::new(egui::RichText::new("●").color(dot)).selectable(false))
+                .on_hover_text(status_text);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("✖").on_hover_text("Beenden").clicked() {
@@ -332,7 +349,6 @@ impl OverlayApp {
                 }
             });
         });
-        ui.separator();
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
@@ -407,7 +423,7 @@ impl OverlayApp {
                     if ui.button("Chat leeren").clicked() {
                         self.messages.clear();
                     }
-                    if ui.button("Fertig").clicked() {
+                    if ui.button("Schließen").clicked() {
                         self.show_settings = false;
                     }
                 });
@@ -556,40 +572,60 @@ impl eframe::App for OverlayApp {
             ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(passthrough));
             self.passthrough_applied = Some(passthrough);
         }
+        if self.show_settings {
+            self.settings_window(&ctx);
+        }
         if self.hidden {
             return;
         }
 
         let edit_mode = !self.locked;
         let full = ui.max_rect();
-        let show_bg = edit_mode || !self.cfg.auto_hide_bg || self.visible_count() > 0;
-        let bg_alpha = if edit_mode { self.cfg.bg_opacity.max(0.55) } else { self.cfg.bg_opacity };
-        if show_bg {
+        let bar_h = if edit_mode { 30.0 } else { 0.0 };
+        let chat_rect = Rect::from_min_max(pos2(full.min.x, full.min.y + bar_h), full.max);
+
+        // Hintergrund des Chats – auch beim Bearbeiten genau so durchsichtig wie eingestellt
+        let show_bg = !self.cfg.auto_hide_bg || self.visible_count() > 0;
+        if show_bg && self.cfg.bg_opacity > 0.0 {
+            let radius = if edit_mode {
+                CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }
+            } else {
+                CornerRadius::same(6)
+            };
             ui.painter().rect_filled(
-                full,
-                CornerRadius::same(6),
-                Color32::from_black_alpha((bg_alpha * 255.0) as u8),
+                chat_rect,
+                radius,
+                Color32::from_black_alpha((self.cfg.bg_opacity * 255.0) as u8),
             );
         }
+
         if edit_mode {
+            // Rahmen, damit die Fenstergröße auch bei 0 % Hintergrund sichtbar ist
             ui.painter().rect_stroke(
                 full.shrink(0.5),
                 CornerRadius::same(6),
                 Stroke::new(1.0, Color32::from_rgb(145, 70, 255)),
                 egui::StrokeKind::Inside,
             );
+            // Obere Leiste: deckend, die ganze Fläche dient zum Verschieben
+            let bar = Rect::from_min_size(full.min, vec2(full.width(), bar_h));
+            ui.painter().rect_filled(
+                bar,
+                CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 },
+                Color32::from_rgb(28, 24, 38),
+            );
+            let drag = ui
+                .interact(bar, ui.scope_id().with("drag_bar"), Sense::click_and_drag())
+                .on_hover_cursor(CursorIcon::Grab);
+            if drag.drag_started() {
+                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+            }
+            let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(8.0, 0.0))));
+            self.title_bar(&mut bar_ui);
         }
 
-        let inner = full.shrink(8.0);
-        let mut content = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        if edit_mode {
-            self.title_bar(&mut content);
-        }
-        if edit_mode && self.show_settings {
-            self.settings(&mut content);
-        } else {
-            self.chat(&mut content, edit_mode);
-        }
+        let mut content = ui.new_child(egui::UiBuilder::new().max_rect(chat_rect.shrink(8.0)));
+        self.chat(&mut content, edit_mode);
 
         // Größe ändern: Griff unten rechts
         if edit_mode {
