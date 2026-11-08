@@ -88,7 +88,7 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.3
 - Das Chatfenster lässt sich an der ganzen oberen Leiste verschieben; die Leiste ist nicht mehr durchsichtig.
 - Beim Bearbeiten zeigt das Chatfenster genau die eingestellte Transparenz.
 - Einstellungen in einem eigenen, nicht durchsichtigen Fenster.
