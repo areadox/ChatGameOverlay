@@ -7,7 +7,7 @@ Shows a channel's Twitch chat as a **transparent, always-on-top window** – rig
 ## Features
 
 - Read any channel's chat live – anonymously without login, or logged in with your Twitch account
-- **Log in with Twitch** and write right from the overlay, even via hotkey in the middle of a game
+- **Log in with Twitch** and write right from the overlay, even via hotkey in the middle of a game *(prepared, will be enabled in an upcoming update)*
 - Copy and paste with Ctrl+C/V and a right-click menu; right-click messages to copy them
 - Borderless, transparent, always-on-top window
 - **Lock mode:** mouse clicks go through the overlay into the game
