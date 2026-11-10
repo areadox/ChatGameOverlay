@@ -16,7 +16,7 @@ use crate::i18n::Lang;
 
 /// Client-ID der Twitch-Anwendung (dev.twitch.tv/console, Typ „Public“).
 /// Nicht geheim – sie steckt in jedem Fall in der fertigen .exe.
-pub const CLIENT_ID: &str = "";
+pub const CLIENT_ID: &str = "7n6qp3csdo5gf1n0nhk3hmgj73lp9e";
 
 const SCOPES: &str = "chat:read chat:edit";
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";

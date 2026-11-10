@@ -7,7 +7,7 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 ## Funktionen
 
 - Chat eines beliebigen Kanals live mitlesen – anonym ohne Login, oder angemeldet mit deinem Twitch-Konto
-- **Mit Twitch anmelden** und direkt aus dem Overlay schreiben, auch per Hotkey mitten im Spiel *(vorbereitet, wird mit einem der nächsten Updates freigeschaltet)*
+- **Mit Twitch anmelden** und direkt aus dem Overlay schreiben, auch per Hotkey mitten im Spiel
 - Kopieren und Einfügen mit Strg+C/V und Rechtsklick-Menü; Rechtsklick auf Nachrichten zum Kopieren
 - Randloses, transparentes Fenster, immer im Vordergrund
 - **Fixier-Modus:** Mausklicks gehen durch das Overlay ins Spiel
@@ -129,6 +129,9 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- Twitch-Anmeldung freigeschaltet: über „Mit Twitch anmelden“ als du selbst anmelden und im Chat schreiben.
 
 ### 0.0.6
 - **Twitch-Anmeldung** (über twitch.tv/activate, ohne Passworteingabe im Programm) und Schreiben im Chat – über die Eingabezeile im Chatfenster oder per **Strg + Umschalt + F11** mitten im Spiel. Vorbereitet; wird freigeschaltet, sobald die Twitch-Anwendung registriert ist.
