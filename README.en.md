@@ -6,7 +6,9 @@ Shows a channel's Twitch chat as a **transparent, always-on-top window** – rig
 
 ## Features
 
-- Read any channel's chat live (anonymously, no login or token)
+- Read any channel's chat live – anonymously without login, or logged in with your Twitch account
+- **Log in with Twitch** and write right from the overlay, even via hotkey in the middle of a game
+- Copy and paste with Ctrl+C/V and a right-click menu; right-click messages to copy them
 - Borderless, transparent, always-on-top window
 - **Lock mode:** mouse clicks go through the overlay into the game
 - Global hotkeys that work while the game has focus
@@ -40,6 +42,27 @@ The files are not digitally signed, so Windows SmartScreen warns on first start:
 |---|---|
 | Ctrl + Shift + F9 | Lock ⇄ edit (move, settings) |
 | Ctrl + Shift + F10 | Show / hide overlay |
+| Ctrl + Shift + F11 | Write in chat (logged in only) |
+
+### Logging in with Twitch and writing
+
+Reading needs no login. If you also want to write:
+
+1. In the settings under **Twitch account**, click **Log in with Twitch**.
+2. Your browser opens `twitch.tv/activate` with a code that is also shown in the settings window. Log in to Twitch there (if you aren't already) and click **Authorize**.
+3. Done – the settings window shows "Logged in as …".
+
+Your password is never entered in the program; it only gets permission from Twitch to read and write chat (`chat:read`, `chat:edit`). The login is saved and renewed automatically. **Log out** in the settings also revokes the permission at Twitch.
+
+**Writing:**
+
+- In edit mode there's an input line at the bottom of the chat window. **Enter** sends.
+- In the middle of a game: **Ctrl + Shift + F11** – the overlay takes the keyboard, type your message, **Enter** sends and focus goes back to the game automatically. **Esc** cancels.
+- `/me text` is sent as an action. Other chat commands (`/ban`, `/timeout` …) aren't supported.
+
+### Copy and paste
+
+All input fields support **Ctrl + C / X / V / A** and a **right-click menu** with *Cut*, *Copy*, *Paste* and *Select all*. Right-clicking a chat message (in edit mode) offers *Copy message*, *Copy name* and *Copy name and message*.
 
 ### Language
 
@@ -72,8 +95,10 @@ This requires write access to the program's own folder. With the installer that'
 
 ## Where settings are stored
 
-- Windows: `%APPDATA%\ChatGameOverlay\`
-- Linux: `~/.local/share/ChatGameOverlay/`
+- Windows: `%APPDATA%\chat-game-overlay\data\app.ron`
+- Linux: `~/.local/share/chat-game-overlay/app.ron`
+
+The Twitch login (access token) is stored there too. Logging out removes it.
 
 ## Building
 
@@ -82,6 +107,8 @@ cargo build --release
 ```
 
 The program file ends up in `target/release/`.
+
+The Twitch login needs the Client ID of your own Twitch application ([dev.twitch.tv/console](https://dev.twitch.tv/console), type **Public**, redirect URL `http://localhost`). It lives in `src/auth.rs` (`CLIENT_ID`); if it's empty, login is disabled and the program only reads.
 
 The installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php) from `installer.iss` (expects the program file as `dist\ChatGameOverlay.exe`):
 

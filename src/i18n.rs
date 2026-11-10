@@ -32,6 +32,10 @@ impl Lang {
     pub fn hotkey_hide(self) -> &'static str {
         self.t("Strg + Umschalt + F10", "Ctrl + Shift + F10")
     }
+
+    pub fn hotkey_write(self) -> &'static str {
+        self.t("Strg + Umschalt + F11", "Ctrl + Shift + F11")
+    }
 }
 
 impl Default for Lang {

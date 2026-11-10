@@ -1,10 +1,13 @@
 // Unter Windows kein Konsolenfenster öffnen
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod auth;
+mod focus;
 mod i18n;
 mod irc;
 mod tray;
 mod update;
+mod widgets;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -20,6 +23,7 @@ use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use serde::{Deserialize, Serialize};
 
+use auth::{Auth, AuthState};
 use i18n::Lang;
 use irc::{Badge, ChatEvent, ChatMessage, Status};
 use update::UpdateState;
@@ -83,6 +87,7 @@ struct OverlayApp {
     _hotkeys: Option<GlobalHotKeyManager>,
     hk_lock: u32,
     hk_hide: u32,
+    hk_write: u32,
     hotkey_error: Option<String>,
 
     update: update::Shared,
@@ -91,6 +96,20 @@ struct OverlayApp {
     /// zuletzt an das Einstellungsfenster geschickter Zustand (true = offen)
     settings_applied: Option<bool>,
     settings_cmd_at: Instant,
+
+    /// Twitch-Anmeldung
+    auth: Auth,
+    /// Stand der Zugangsdaten, mit dem der Chat zuletzt verbunden wurde
+    auth_gen: u64,
+    /// eigene Nachrichten an den Chat-Thread
+    out_tx: Sender<String>,
+    /// eigener Anzeigename, Farbe und Abzeichen laut Twitch
+    own: Option<(String, Option<Color32>, Vec<Badge>)>,
+    /// Text in der Eingabezeile
+    compose: String,
+    compose_focus: bool,
+    /// per Hotkey zum Schreiben geöffnet: (Fenster, das vorher den Fokus hatte, war fixiert)
+    write_return: Option<(isize, bool)>,
 }
 
 impl OverlayApp {
@@ -103,8 +122,9 @@ impl OverlayApp {
         // Globale Hotkeys – funktionieren auch, während das Spiel im Fokus ist
         let lock = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F9);
         let hide = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F10);
+        let write = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F11);
         let (manager, hotkey_error) = match GlobalHotKeyManager::new() {
-            Ok(m) => match m.register_all(&[lock, hide]) {
+            Ok(m) => match m.register_all(&[lock, hide, write]) {
                 Ok(()) => (Some(m), None),
                 Err(e) => (Some(m), Some(e.to_string())),
             },
@@ -112,7 +132,14 @@ impl OverlayApp {
         };
 
         let cfg_lang = cfg.language;
+        // gespeichert wird `Option<Tokens>` – also genau so wieder laden
+        let tokens: Option<auth::Tokens> = cc
+            .storage
+            .and_then(|s| eframe::get_value::<Option<auth::Tokens>>(s, "twitch"))
+            .flatten();
+        let auth = Auth::new(cc.egui_ctx.clone(), tokens);
         let (tx, rx) = mpsc::channel();
+        let (out_tx, _) = mpsc::channel();
         let mut app = Self {
             channel_input: cfg.channel.clone(),
             locked: cfg.start_locked && !cfg.channel.trim().is_empty(),
@@ -129,14 +156,22 @@ impl OverlayApp {
             _hotkeys: manager,
             hk_lock: lock.id(),
             hk_hide: hide.id(),
+            hk_write: write.id(),
             hotkey_error,
             update: Arc::new(std::sync::Mutex::new(UpdateState::Idle)),
             tray: tray::Tray::new(icon().rgba, 32, cfg_lang),
             settings_applied: None,
             settings_cmd_at: Instant::now(),
+            auth_gen: auth.generation(),
+            auth,
+            out_tx,
+            own: None,
+            compose: String::new(),
+            compose_focus: false,
+            write_return: None,
         };
         if !app.cfg.channel.trim().is_empty() {
-            app.connect(&cc.egui_ctx);
+            app.connect(&cc.egui_ctx, false);
         }
         if app.cfg.auto_update_check {
             update::check(app.update.clone(), cc.egui_ctx.clone(), app.cfg.language);
@@ -144,13 +179,19 @@ impl OverlayApp {
         app
     }
 
-    fn connect(&mut self, ctx: &egui::Context) {
+    /// (Neu) verbinden. `keep_messages`: bisherigen Chat stehen lassen (z. B. nach Anmeldung)
+    fn connect(&mut self, ctx: &egui::Context, keep_messages: bool) {
         self.stop.store(true, Ordering::Relaxed);
         // Ereignisse der alten Verbindung verwerfen
         let (tx, rx) = mpsc::channel();
         self.tx = tx;
         self.rx = rx;
-        self.messages.clear();
+        let (out_tx, out_rx) = mpsc::channel();
+        self.out_tx = out_tx;
+        self.own = None;
+        if !keep_messages {
+            self.messages.clear();
+        }
 
         let channel = self.cfg.channel.trim().trim_start_matches('#').to_lowercase();
         self.cfg.channel = channel.clone();
@@ -161,22 +202,50 @@ impl OverlayApp {
         }
         self.stop = Arc::new(AtomicBool::new(false));
         self.status = Status::Connecting;
-        irc::spawn(channel, self.tx.clone(), ctx.clone(), self.stop.clone());
+        irc::spawn(
+            channel,
+            self.auth.credentials(),
+            self.tx.clone(),
+            out_rx,
+            ctx.clone(),
+            self.stop.clone(),
+        );
     }
 
-    fn handle_events(&mut self) {
+    fn push_message(&mut self, m: ChatMessage) {
+        self.messages.push_back(m);
+        while self.messages.len() > self.cfg.max_messages.max(10) {
+            self.messages.pop_front();
+        }
+    }
+
+    fn push_system(&mut self, text: String) {
+        self.push_message(ChatMessage {
+            id: String::new(),
+            user_login: String::new(),
+            display_name: String::new(),
+            color: Color32::GRAY,
+            text,
+            is_action: false,
+            system: true,
+            badges: Vec::new(),
+            received: Instant::now(),
+        });
+    }
+
+    fn handle_events(&mut self, ctx: &egui::Context) {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
-                ChatEvent::Message(m) => {
-                    self.messages.push_back(m);
-                    while self.messages.len() > self.cfg.max_messages.max(10) {
-                        self.messages.pop_front();
-                    }
-                }
+                ChatEvent::Message(m) => self.push_message(m),
                 ChatEvent::Delete(id) => self.messages.retain(|m| m.id != id),
                 ChatEvent::ClearUser(Some(user)) => self.messages.retain(|m| m.user_login != user),
                 ChatEvent::ClearUser(None) => self.messages.clear(),
                 ChatEvent::Status(s) => self.status = s,
+                ChatEvent::OwnState { display_name, color, badges } => {
+                    self.own = Some((display_name, color, badges));
+                }
+                ChatEvent::Notice(text) => self.push_system(text),
+                ChatEvent::AuthFailed => self.auth.report_auth_failed(),
             }
         }
         while let Ok(ev) = GlobalHotKeyEvent::receiver().try_recv() {
@@ -187,8 +256,94 @@ impl OverlayApp {
                 self.toggle_lock();
             } else if ev.id == self.hk_hide {
                 self.hidden = !self.hidden;
+            } else if ev.id == self.hk_write {
+                self.begin_write(ctx);
             }
         }
+    }
+
+    fn logged_in(&self) -> bool {
+        matches!(self.auth.state(), AuthState::LoggedIn { .. })
+    }
+
+    /// Hotkey „Schreiben“: Overlay holt sich die Tastatur, danach geht der Fokus ans Spiel zurück
+    fn begin_write(&mut self, ctx: &egui::Context) {
+        if !self.logged_in() || self.connected_channel.is_empty() {
+            self.show_settings = true;
+            return;
+        }
+        if self.write_return.is_none() {
+            self.write_return = Some((focus::current(), self.locked));
+        }
+        self.hidden = false;
+        self.locked = false;
+        self.compose_focus = true;
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Focus);
+    }
+
+    fn end_write(&mut self) {
+        if let Some((window, was_locked)) = self.write_return.take() {
+            self.locked = was_locked;
+            focus::restore(window);
+        }
+    }
+
+    fn send_message(&mut self) {
+        let l = self.cfg.language;
+        let text: String = self.compose.trim().chars().take(500).collect();
+        if text.is_empty() {
+            return;
+        }
+        if self.status != Status::Connected {
+            // Text stehen lassen, damit man es gleich noch einmal versuchen kann
+            self.push_system(
+                l.t(
+                    "Nicht mit dem Chat verbunden – Nachricht wurde nicht gesendet.",
+                    "Not connected to chat – message was not sent.",
+                )
+                .to_string(),
+            );
+            return;
+        }
+        self.compose.clear();
+        let (wire, shown, is_action) = if let Some(rest) = text.strip_prefix("/me ") {
+            (format!("\u{1}ACTION {rest}\u{1}"), rest.to_string(), true)
+        } else if text.starts_with('/') {
+            self.push_system(
+                l.t(
+                    "Chat-Befehle (/…) werden hier nicht unterstützt – nur /me.",
+                    "Chat commands (/…) aren't supported here – only /me.",
+                )
+                .to_string(),
+            );
+            return;
+        } else {
+            (text.clone(), text, false)
+        };
+        if self.out_tx.send(wire).is_err() {
+            return;
+        }
+        // Twitch schickt eigene Nachrichten nicht zurück – also selbst anzeigen
+        let login = self.auth.credentials().map(|c| c.0).unwrap_or_default();
+        let (name, color, badges) = match &self.own {
+            Some((n, c, b)) => (
+                if n.is_empty() { login.clone() } else { n.clone() },
+                c.unwrap_or_else(|| irc::color_for(&login)),
+                b.clone(),
+            ),
+            None => (login.clone(), irc::color_for(&login), Vec::new()),
+        };
+        self.push_message(ChatMessage {
+            id: String::new(),
+            user_login: login,
+            display_name: name,
+            color,
+            text: shown,
+            is_action,
+            system: false,
+            badges,
+            received: Instant::now(),
+        });
     }
 
     /// Sichtbarkeit einer Nachricht (0.0 – 1.0) beim Ausblenden nach Zeit
@@ -435,20 +590,24 @@ impl OverlayApp {
 
                 ui.label(l.t("Twitch-Kanal:", "Twitch channel:"));
                 ui.horizontal(|ui| {
-                    let edit = ui.add(
-                        egui::TextEdit::singleline(&mut self.channel_input)
-                            .hint_text(l.t("z. B. areadox", "e.g. areadox"))
-                            .desired_width(160.0),
-                    );
-                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let enter = widgets::text_field(
+                        ui,
+                        &mut self.channel_input,
+                        |e| e.hint_text(l.t("z. B. areadox", "e.g. areadox")).desired_width(160.0),
+                        l,
+                    )
+                    .submitted;
                     if ui.button(l.t("Verbinden", "Connect")).clicked() || enter {
                         self.cfg.channel = self.channel_input.clone();
                         let ctx = ui.ctx().clone();
-                        self.connect(&ctx);
+                        self.connect(&ctx, false);
                         self.channel_input = self.cfg.channel.clone();
                     }
                 });
                 ui.add_space(6.0);
+                self.account_section(ui);
+                ui.add_space(4.0);
+                ui.separator();
 
                 ui.add(egui::Slider::new(&mut self.cfg.font_size, 10.0..=40.0).text(l.t("Schriftgröße", "Font size")));
                 let mut pct = (self.cfg.bg_opacity * 100.0).round();
@@ -485,6 +644,11 @@ impl OverlayApp {
                 ui.label(egui::RichText::new(l.t("Hotkeys (auch im Spiel):", "Hotkeys (work in-game too):")).strong());
                 ui.label(format!("{}: {}", l.hotkey_lock(), l.t("fixieren / bearbeiten", "lock / edit")));
                 ui.label(format!("{}: {}", l.hotkey_hide(), l.t("ein- / ausblenden", "show / hide")));
+                ui.label(format!(
+                    "{}: {}",
+                    l.hotkey_write(),
+                    l.t("im Chat schreiben (angemeldet)", "write in chat (logged in)")
+                ));
                 if let Some(e) = &self.hotkey_error {
                     ui.colored_label(
                         Color32::from_rgb(230, 120, 80),
@@ -517,6 +681,135 @@ impl OverlayApp {
                     }
                 });
             });
+    }
+
+    fn account_section(&mut self, ui: &mut egui::Ui) {
+        let l = self.cfg.language;
+        let warn = Color32::from_rgb(230, 120, 80);
+        ui.label(egui::RichText::new(l.t("Twitch-Konto:", "Twitch account:")).strong());
+        match self.auth.state() {
+            state @ (AuthState::LoggedOut | AuthState::Error(_)) => {
+                if let AuthState::Error(e) = state {
+                    ui.colored_label(warn, e);
+                }
+                ui.label(
+                    egui::RichText::new(l.t(
+                        "Ohne Anmeldung liest du nur mit. Angemeldet kannst du direkt aus dem Overlay schreiben.",
+                        "Without logging in you can only read. Logged in, you can write right from the overlay.",
+                    ))
+                    .weak(),
+                );
+                if auth::available() {
+                    if ui.button(l.t("Mit Twitch anmelden", "Log in with Twitch")).clicked() {
+                        self.auth.start_login(l);
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new(l.t(
+                            "Anmeldung ist in dieser Version noch nicht verfügbar.",
+                            "Login isn't available in this version yet.",
+                        ))
+                        .italics(),
+                    );
+                }
+            }
+            AuthState::Starting => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(l.t("Verbinde mit Twitch …", "Contacting Twitch …"));
+                });
+            }
+            AuthState::WaitingForUser { user_code, uri } => {
+                ui.label(l.t(
+                    "Bestätige die Anmeldung im Browser. Falls er sich nicht geöffnet hat:",
+                    "Confirm the login in your browser. If it didn't open:",
+                ));
+                ui.hyperlink_to(l.t("twitch.tv/activate öffnen", "Open twitch.tv/activate"), &uri);
+                ui.horizontal(|ui| {
+                    ui.label(l.t("Code:", "Code:"));
+                    ui.label(egui::RichText::new(&user_code).monospace().size(20.0).strong());
+                    if ui
+                        .small_button("📋")
+                        .on_hover_text(l.t("Code kopieren", "Copy code"))
+                        .clicked()
+                    {
+                        ui.ctx().copy_text(user_code.clone());
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(l.t("Warte auf Bestätigung …", "Waiting for confirmation …"));
+                });
+                if ui.button(l.t("Abbrechen", "Cancel")).clicked() {
+                    self.auth.cancel_login();
+                }
+            }
+            AuthState::LoggedIn { login } => {
+                let name = self
+                    .own
+                    .as_ref()
+                    .map(|o| o.0.clone())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(login);
+                ui.colored_label(
+                    Color32::from_rgb(60, 200, 90),
+                    format!("✔ {} {name}", l.t("Angemeldet als", "Logged in as")),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} {}",
+                        l.t(
+                            "Schreiben: im Bearbeiten-Modus unten im Chatfenster oder per",
+                            "To write: at the bottom of the chat window in edit mode, or press",
+                        ),
+                        l.hotkey_write()
+                    ))
+                    .weak(),
+                );
+                if ui.button(l.t("Abmelden", "Log out")).clicked() {
+                    self.auth.logout();
+                }
+            }
+        }
+    }
+
+    /// Eingabezeile unten im Chatfenster
+    fn compose_bar(&mut self, ui: &mut egui::Ui) {
+        let l = self.cfg.language;
+        ui.horizontal_centered(|ui| {
+            let send_w = 28.0;
+            let field_w = (ui.available_width() - send_w - 8.0).max(60.0);
+            let out = widgets::text_field(
+                ui,
+                &mut self.compose,
+                |e| {
+                    e.hint_text(l.t("Nachricht senden …", "Send a message …"))
+                        .desired_width(field_w)
+                        .char_limit(500)
+                        .font(FontId::proportional(15.0))
+                },
+                l,
+            );
+            if self.compose_focus {
+                out.response.request_focus();
+                self.compose_focus = false;
+            }
+            let escape = out.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+            let send_clicked = ui
+                .add_sized([send_w, 22.0], egui::Button::new("➤"))
+                .on_hover_text(l.t("Senden (Enter)", "Send (Enter)"))
+                .clicked();
+            if out.submitted || send_clicked {
+                self.send_message();
+                if self.write_return.is_some() {
+                    self.end_write();
+                } else {
+                    out.response.request_focus();
+                }
+            } else if escape {
+                self.end_write();
+            }
+        });
     }
 
     fn chat(&self, ui: &mut egui::Ui, edit_mode: bool) {
@@ -552,10 +845,31 @@ impl OverlayApp {
                     }
                     let job = build_job(m, size, width, alpha, self.cfg.show_badges);
                     let galley = ui.painter().layout_job(job);
-                    let (rect, _) = ui.allocate_exact_size(
+                    let (rect, resp) = ui.allocate_exact_size(
                         vec2(width, galley.size().y + 2.0),
-                        Sense::hover(),
+                        if edit_mode { Sense::click() } else { Sense::hover() },
                     );
+                    if edit_mode {
+                        resp.context_menu(|ui| {
+                            if ui.button(l.t("Nachricht kopieren", "Copy message")).clicked() {
+                                ui.ctx().copy_text(m.text.clone());
+                                ui.close();
+                            }
+                            if !m.system {
+                                if ui.button(l.t("Name kopieren", "Copy name")).clicked() {
+                                    ui.ctx().copy_text(m.display_name.clone());
+                                    ui.close();
+                                }
+                                if ui
+                                    .button(l.t("Name und Nachricht kopieren", "Copy name and message"))
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(format!("{}: {}", m.display_name, m.text));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                     // dunkler Schatten für Lesbarkeit auf hellem Spielhintergrund
                     let shadow = Color32::from_black_alpha((200.0 * alpha) as u8);
                     for off in [vec2(1.0, 1.0), vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(-1.0, -1.0)] {
@@ -582,6 +896,20 @@ fn build_job(m: &ChatMessage, size: f32, width: f32, alpha: f32, badges: bool) -
     let font = FontId::proportional(size);
     let mut job = LayoutJob::default();
     job.wrap.max_width = width;
+
+    if m.system {
+        job.append(
+            &m.text,
+            0.0,
+            TextFormat {
+                font_id: FontId::proportional(size * 0.9),
+                color: a(Color32::from_gray(170)),
+                italics: true,
+                ..Default::default()
+            },
+        );
+        return job;
+    }
 
     if badges {
         for b in &m.badges {
@@ -645,6 +973,7 @@ impl eframe::App for OverlayApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "config", &self.cfg);
+        eframe::set_value(storage, "twitch", &self.auth.tokens());
     }
 
     fn auto_save_interval(&self) -> Duration {
@@ -652,8 +981,16 @@ impl eframe::App for OverlayApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.handle_events();
         let ctx = ui.ctx().clone();
+        self.handle_events(&ctx);
+        // An- oder abgemeldet bzw. Token erneuert → Chat mit neuen Zugangsdaten verbinden
+        let gen_now = self.auth.generation();
+        if gen_now != self.auth_gen {
+            self.auth_gen = gen_now;
+            if !self.connected_channel.is_empty() {
+                self.connect(&ctx, true);
+            }
+        }
         // regelmäßig neu zeichnen: Hotkeys abfragen, Ausblenden animieren
         ctx.request_repaint_after(Duration::from_millis(100));
 
@@ -713,8 +1050,25 @@ impl eframe::App for OverlayApp {
             self.title_bar(&mut bar_ui);
         }
 
-        let mut content = ui.new_child(egui::UiBuilder::new().max_rect(chat_rect.shrink(8.0)));
+        // Eingabezeile, wenn angemeldet und im Bearbeiten-Modus
+        let show_compose = edit_mode && self.logged_in() && !self.connected_channel.is_empty();
+        let compose_h = if show_compose { 34.0 } else { 0.0 };
+        let messages_rect =
+            Rect::from_min_max(chat_rect.min, pos2(chat_rect.max.x, chat_rect.max.y - compose_h));
+        let mut content = ui.new_child(egui::UiBuilder::new().max_rect(messages_rect.shrink(8.0)));
         self.chat(&mut content, edit_mode);
+        if show_compose {
+            let bar = Rect::from_min_max(pos2(chat_rect.min.x, chat_rect.max.y - compose_h), chat_rect.max);
+            ui.painter().rect_filled(
+                bar,
+                CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 },
+                Color32::from_rgb(28, 24, 38),
+            );
+            // rechts Platz für den Größen-Griff lassen
+            let inner = Rect::from_min_max(bar.min + vec2(6.0, 0.0), bar.max - vec2(20.0, 0.0));
+            let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+            self.compose_bar(&mut bar_ui);
+        }
 
         // Größe ändern: Griff unten rechts
         if edit_mode {

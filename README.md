@@ -6,7 +6,9 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 
 ## Funktionen
 
-- Chat eines beliebigen Kanals live mitlesen (anonym, ohne Login oder Token)
+- Chat eines beliebigen Kanals live mitlesen – anonym ohne Login, oder angemeldet mit deinem Twitch-Konto
+- **Mit Twitch anmelden** und direkt aus dem Overlay schreiben, auch per Hotkey mitten im Spiel
+- Kopieren und Einfügen mit Strg+C/V und Rechtsklick-Menü; Rechtsklick auf Nachrichten zum Kopieren
 - Randloses, transparentes Fenster, immer im Vordergrund
 - **Fixier-Modus:** Mausklicks gehen durch das Overlay ins Spiel
 - Globale Hotkeys, die auch funktionieren, während das Spiel den Fokus hat
@@ -40,6 +42,27 @@ Da die Dateien nicht digital signiert sind, warnt Windows SmartScreen beim erste
 |---|---|
 | Strg + Umschalt + F9 | Fixieren ⇄ Bearbeiten (verschieben, Einstellungen) |
 | Strg + Umschalt + F10 | Overlay ein- / ausblenden |
+| Strg + Umschalt + F11 | Im Chat schreiben (nur angemeldet) |
+
+### Mit Twitch anmelden und schreiben
+
+Zum Mitlesen ist keine Anmeldung nötig. Wer auch schreiben möchte:
+
+1. In den Einstellungen unter **Twitch-Konto** auf **Mit Twitch anmelden** klicken.
+2. Der Browser öffnet `twitch.tv/activate` mit einem Code, der auch im Einstellungsfenster steht. Dort bei Twitch anmelden (falls noch nicht) und auf **Autorisieren** klicken.
+3. Fertig – das Einstellungsfenster zeigt „Angemeldet als …“.
+
+Das Passwort wird dabei nie im Programm eingegeben; das Programm bekommt von Twitch nur die Berechtigung, den Chat zu lesen und zu schreiben (`chat:read`, `chat:edit`). Die Anmeldung bleibt gespeichert und wird automatisch erneuert. **Abmelden** in den Einstellungen nimmt die Berechtigung bei Twitch auch wieder zurück.
+
+**Schreiben:**
+
+- Im Bearbeiten-Modus gibt es unten im Chatfenster eine Eingabezeile. **Enter** sendet.
+- Mitten im Spiel: **Strg + Umschalt + F11** – das Overlay holt sich die Tastatur, Nachricht tippen, **Enter** sendet, und der Fokus geht automatisch ans Spiel zurück. **Esc** bricht ab.
+- `/me Text` wird als Aktion gesendet. Andere Chat-Befehle (`/ban`, `/timeout` …) werden nicht unterstützt.
+
+### Kopieren und Einfügen
+
+In allen Eingabefeldern funktionieren **Strg + C / X / V / A** und ein **Rechtsklick-Menü** mit *Ausschneiden*, *Kopieren*, *Einfügen* und *Alles auswählen*. Ein Rechtsklick auf eine Chatnachricht (im Bearbeiten-Modus) bietet *Nachricht kopieren*, *Name kopieren* und *Name und Nachricht kopieren*.
 
 ### Taskleiste und Tray
 
@@ -68,8 +91,10 @@ Dafür muss das Programm in seinem eigenen Ordner Schreibrechte haben. Beim Inst
 
 ## Speicherort der Einstellungen
 
-- Windows: `%APPDATA%\ChatGameOverlay\`
-- Linux: `~/.local/share/ChatGameOverlay/`
+- Windows: `%APPDATA%\chat-game-overlay\data\app.ron`
+- Linux: `~/.local/share/chat-game-overlay/app.ron`
+
+Dort liegt auch die Twitch-Anmeldung (Zugangs-Token). Wer sich abmeldet, entfernt sie wieder.
 
 ## Selbst bauen
 
@@ -78,6 +103,8 @@ cargo build --release
 ```
 
 Die fertige Datei liegt dann unter `target/release/`.
+
+Für die Twitch-Anmeldung braucht das Programm die Client-ID einer eigenen Twitch-Anwendung ([dev.twitch.tv/console](https://dev.twitch.tv/console), Typ **Public**, Redirect-URL `http://localhost`). Sie steht in `src/auth.rs` (`CLIENT_ID`); ist sie leer, ist die Anmeldung abgeschaltet und das Programm liest nur mit.
 
 Der Installer wird mit [Inno Setup](https://jrsoftware.org/isinfo.php) aus `installer.iss` gebaut (erwartet die Programmdatei als `dist\ChatGameOverlay.exe`):
 
@@ -102,6 +129,13 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- **Twitch-Anmeldung** (Geräte-Code über twitch.tv/activate, ohne Passworteingabe im Programm) und Schreiben im Chat – über die Eingabezeile im Chatfenster oder per **Strg + Umschalt + F11** mitten im Spiel.
+- Hinweise von Twitch (z. B. Slow-Mode) erscheinen im Chat.
+- Kopieren und Einfügen funktionieren wieder (Strg+C/V), und Links lassen sich öffnen – beides war seit 0.0.2 versehentlich abgeschaltet.
+- Rechtsklick-Menü für Eingabefelder (Ausschneiden, Kopieren, Einfügen, Alles auswählen) und für Chatnachrichten (Nachricht/Name kopieren).
+- Speicherort der Einstellungen in der README korrigiert.
 
 ### 0.0.5
 - Sprachauswahl Deutsch / Englisch für Programm, Tray-Menü und Update-Meldungen; beim ersten Start wird die Windows-Sprache übernommen.

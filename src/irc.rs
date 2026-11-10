@@ -1,13 +1,13 @@
-//! Anonyme Verbindung zum Twitch-Chat (IRC).
+//! Verbindung zum Twitch-Chat (IRC).
 //!
-//! Zum reinen Mitlesen braucht Twitch keinen Login: man meldet sich als
-//! „justinfan…“ an und bekommt alle Nachrichten des Kanals.
+//! Ohne Anmeldung liest das Programm anonym als „justinfan…“ mit.
+//! Mit Anmeldung (Token mit chat:read/chat:edit) kann es auch schreiben.
 
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,8 @@ pub struct ChatMessage {
     pub color: Color32,
     pub text: String,
     pub is_action: bool,
+    /// Hinweis von Twitch (z. B. Slow-Mode), kein Benutzertext
+    pub system: bool,
     pub badges: Vec<Badge>,
     pub received: Instant,
 }
@@ -42,6 +44,20 @@ pub enum ChatEvent {
     /// Alle Nachrichten eines Users gelöscht (Timeout/Bann) – `None` = ganzer Chat geleert.
     ClearUser(Option<String>),
     Status(Status),
+    /// eigener Anzeigename, Farbe und Abzeichen (für selbst geschriebene Nachrichten)
+    OwnState { display_name: String, color: Option<Color32>, badges: Vec<Badge> },
+    /// Hinweis von Twitch, z. B. „Slow-Mode aktiv“
+    Notice(String),
+    /// Token ungültig – Verbindung wurde beendet
+    AuthFailed,
+}
+
+/// Zugangsdaten für den Chat: (Login-Name, Token)
+pub type Credentials = Option<(String, String)>;
+
+enum End {
+    Retry,
+    AuthFailed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,13 +68,27 @@ pub enum Status {
 }
 
 /// Läuft im Hintergrund, bis `stop` gesetzt wird. Verbindet bei Abbruch automatisch neu.
-pub fn spawn(channel: String, tx: Sender<ChatEvent>, ctx: Context, stop: Arc<AtomicBool>) {
+/// Über `outgoing` geschickte Texte werden als Chatnachricht gesendet (nur mit Anmeldung).
+pub fn spawn(
+    channel: String,
+    creds: Credentials,
+    tx: Sender<ChatEvent>,
+    outgoing: Receiver<String>,
+    ctx: Context,
+    stop: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         let channel = channel.trim().trim_start_matches('#').to_lowercase();
         while !stop.load(Ordering::Relaxed) {
             let _ = tx.send(ChatEvent::Status(Status::Connecting));
             ctx.request_repaint();
-            let _ = run_connection(&channel, &tx, &ctx, &stop);
+            let end = run_connection(&channel, &creds, &tx, &outgoing, &ctx, &stop);
+            if let Ok(End::AuthFailed) = end {
+                let _ = tx.send(ChatEvent::AuthFailed);
+                let _ = tx.send(ChatEvent::Status(Status::Disconnected));
+                ctx.request_repaint();
+                return;
+            }
             let _ = tx.send(ChatEvent::Status(Status::Disconnected));
             ctx.request_repaint();
             // kurz warten, dann neu verbinden
@@ -74,16 +104,24 @@ pub fn spawn(channel: String, tx: Sender<ChatEvent>, ctx: Context, stop: Arc<Ato
 
 fn run_connection(
     channel: &str,
+    creds: &Credentials,
     tx: &Sender<ChatEvent>,
+    outgoing: &Receiver<String>,
     ctx: &Context,
     stop: &AtomicBool,
-) -> std::io::Result<()> {
+) -> std::io::Result<End> {
     let mut stream = TcpStream::connect(SERVER)?;
-    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
-    let nick = format!("justinfan{}", 10000 + (std::process::id() % 80000));
+    stream.set_read_timeout(Some(Duration::from_millis(100)))?;
+    let (pass, nick) = match creds {
+        Some((login, token)) => (format!("oauth:{token}"), login.to_lowercase()),
+        None => (
+            "SCHMOOPIIE".to_string(),
+            format!("justinfan{}", 10000 + (std::process::id() % 80000)),
+        ),
+    };
     write!(
         stream,
-        "CAP REQ :twitch.tv/tags twitch.tv/commands\r\nPASS SCHMOOPIIE\r\nNICK {nick}\r\nJOIN #{channel}\r\n"
+        "CAP REQ :twitch.tv/tags twitch.tv/commands\r\nPASS {pass}\r\nNICK {nick}\r\nJOIN #{channel}\r\n"
     )?;
     stream.flush()?;
 
@@ -95,10 +133,17 @@ fn run_connection(
     loop {
         if stop.load(Ordering::Relaxed) {
             let _ = writer.write_all(format!("PART #{channel}\r\n").as_bytes());
-            return Ok(());
+            return Ok(End::Retry);
+        }
+        // eigene Nachrichten senden
+        while let Ok(text) = outgoing.try_recv() {
+            if creds.is_some() {
+                let text: String = text.replace(['\r', '\n'], " ");
+                writer.write_all(format!("PRIVMSG #{channel} :{text}\r\n").as_bytes())?;
+            }
         }
         match reader.read_line(&mut line) {
-            Ok(0) => return Ok(()), // Verbindung geschlossen
+            Ok(0) => return Ok(End::Retry), // Verbindung geschlossen
             Ok(_) => {
                 if !line.ends_with('\n') {
                     continue;
@@ -111,15 +156,19 @@ fn run_connection(
                     continue;
                 }
                 if let Some(ev) = parse_line(&msg) {
+                    let auth_failed = matches!(ev, ChatEvent::AuthFailed);
                     let _ = tx.send(ev);
                     ctx.request_repaint();
+                    if auth_failed {
+                        return Ok(End::AuthFailed);
+                    }
                 }
             }
             Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                 // Twitch schickt alle ~5 Minuten ein PING. Kommt 7 Minuten lang nichts,
                 // ist die Verbindung tot.
                 if last_data.elapsed() > Duration::from_secs(420) {
-                    return Ok(());
+                    return Ok(End::Retry);
                 }
             }
             Err(e) => return Err(e),
@@ -167,17 +216,7 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
             let color = tag("color")
                 .and_then(|c| Color32::from_hex(&c).ok())
                 .unwrap_or_else(|| fallback_color(&login));
-            let badges = tag("badges")
-                .unwrap_or_default()
-                .split(',')
-                .filter_map(|b| match b.split('/').next()? {
-                    "broadcaster" => Some(Badge::Broadcaster),
-                    "moderator" => Some(Badge::Moderator),
-                    "vip" => Some(Badge::Vip),
-                    "subscriber" | "founder" => Some(Badge::Subscriber),
-                    _ => None,
-                })
-                .collect();
+            let badges = parse_badges(&tag("badges").unwrap_or_default());
             Some(ChatEvent::Message(ChatMessage {
                 id: tag("id").unwrap_or_default(),
                 user_login: login,
@@ -185,6 +224,7 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
                 color,
                 text,
                 is_action,
+                system: false,
                 badges,
                 received: Instant::now(),
             }))
@@ -194,9 +234,43 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
             let user = params.split_once(" :").map(|(_, u)| u.to_lowercase());
             Some(ChatEvent::ClearUser(user))
         }
+        "USERSTATE" | "GLOBALUSERSTATE" => Some(ChatEvent::OwnState {
+            display_name: tag("display-name").unwrap_or_default(),
+            color: tag("color").and_then(|c| Color32::from_hex(&c).ok()),
+            badges: parse_badges(&tag("badges").unwrap_or_default()),
+        }),
+        "NOTICE" => {
+            let text = params.split_once(" :").map(|(_, t)| t).unwrap_or("").to_string();
+            if text.contains("Login authentication failed")
+                || text.contains("Improperly formatted auth")
+            {
+                Some(ChatEvent::AuthFailed)
+            } else if text.is_empty() {
+                None
+            } else {
+                Some(ChatEvent::Notice(text))
+            }
+        }
         "RECONNECT" => None, // Server trennt gleich – Neuverbindung passiert automatisch
         _ => None,
     }
+}
+
+fn parse_badges(raw: &str) -> Vec<Badge> {
+    raw.split(',')
+        .filter_map(|b| match b.split('/').next()? {
+            "broadcaster" => Some(Badge::Broadcaster),
+            "moderator" => Some(Badge::Moderator),
+            "vip" => Some(Badge::Vip),
+            "subscriber" | "founder" => Some(Badge::Subscriber),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Twitch-Standardfarbe für einen Namen (wenn er keine eigene hat)
+pub fn color_for(login: &str) -> Color32 {
+    fallback_color(login)
 }
 
 fn unescape_tag(v: &str) -> String {
@@ -271,6 +345,19 @@ mod tests {
         assert!(matches!(
             parse_line("@target-msg-id=xyz :tmi.twitch.tv CLEARMSG #a :text"),
             Some(ChatEvent::Delete(id)) if id == "xyz"
+        ));
+        assert!(matches!(
+            parse_line(":tmi.twitch.tv NOTICE * :Login authentication failed"),
+            Some(ChatEvent::AuthFailed)
+        ));
+        assert!(matches!(
+            parse_line("@msg-id=slow_on :tmi.twitch.tv NOTICE #a :This room is now in slow mode."),
+            Some(ChatEvent::Notice(t)) if t.starts_with("This room")
+        ));
+        assert!(matches!(
+            parse_line("@badges=broadcaster/1;color=#9146FF;display-name=Areadox :tmi.twitch.tv USERSTATE #areadox"),
+            Some(ChatEvent::OwnState { display_name, badges, .. })
+                if display_name == "Areadox" && badges == vec![Badge::Broadcaster]
         ));
     }
 }

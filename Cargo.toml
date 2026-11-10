@@ -6,7 +6,8 @@ description = "Twitch-Chat als transparentes Overlay immer im Vordergrund über 
 authors = ["areadox"]
 
 [dependencies]
-eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "system_fonts", "persistence", "x11", "wayland"] }
+arboard = { version = "3.7.0", default-features = false }
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "system_fonts", "persistence", "x11", "wayland", "clipboard", "links"] }
 global-hotkey = "0.9.0"
 self-replace = "1.5.1"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -24,3 +25,7 @@ winresource = "0.1.34"
 
 [target."cfg(windows)".dependencies]
 tray-icon = "0.26.1"
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+
+[dev-dependencies]
+ron = "0.12.3"
