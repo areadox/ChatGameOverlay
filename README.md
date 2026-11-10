@@ -130,7 +130,7 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.7
 - Twitch-Anmeldung freigeschaltet: über „Mit Twitch anmelden“ als du selbst anmelden und im Chat schreiben.
 
 ### 0.0.6
