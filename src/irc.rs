@@ -30,7 +30,17 @@ pub struct ChatMessage {
     /// Chatnachricht, die zu einer eigenen Kanalpunkte-Belohnung gehört (Texteingabe)
     pub reward_id: Option<String>,
     pub badges: Vec<Badge>,
+    /// Twitch-Emotes im Text (Zeichenpositionen)
+    pub emotes: Vec<EmoteSpan>,
     pub received: Instant,
+}
+
+/// Ein Emote im Nachrichtentext: Zeichen `start..end` (Unicode-Zeichen, `end` exklusiv)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmoteSpan {
+    pub start: usize,
+    pub end: usize,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,12 +52,17 @@ pub enum Highlight {
     Highlighted,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Badge {
-    Broadcaster,
-    Moderator,
-    Vip,
-    Subscriber,
+/// Abzeichen wie im Twitch-Tag `badges`, z. B. `subscriber/12` oder `moderator/1`
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Badge {
+    pub set: String,
+    pub version: String,
+}
+
+impl Badge {
+    pub fn new(set: &str, version: &str) -> Self {
+        Self { set: set.into(), version: version.into() }
+    }
 }
 
 pub enum ChatEvent {
@@ -65,6 +80,8 @@ pub enum ChatEvent {
     AuthFailed,
     /// Zustand des Kanalpunkte-Empfangs (EventSub)
     Redemptions(crate::eventsub::EsStatus),
+    /// Kanal betreten; `room_id` = Twitch-ID des Kanals (für Abzeichen/Emotes)
+    Joined { room_id: Option<String> },
 }
 
 /// Zugangsdaten für den Chat: (Login-Name, Token)
@@ -214,7 +231,8 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
     let (command, params) = rest.split_once(' ').unwrap_or((rest, ""));
 
     match command {
-        "001" | "ROOMSTATE" => Some(ChatEvent::Status(Status::Connected)),
+        "001" => Some(ChatEvent::Status(Status::Connected)),
+        "ROOMSTATE" => Some(ChatEvent::Joined { room_id: tag("room-id").filter(|r| !r.is_empty()) }),
         "PRIVMSG" => {
             let text = params.split_once(" :").map(|(_, t)| t).unwrap_or("");
             let login = prefix.split('!').next().unwrap_or("").to_string();
@@ -237,6 +255,7 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
                 _ => None,
             };
             let reward_id = tag("custom-reward-id").filter(|r| !r.is_empty());
+            let emotes = parse_emotes(&tag("emotes").unwrap_or_default(), text.chars().count());
             Some(ChatEvent::Message(ChatMessage {
                 id: tag("id").unwrap_or_default(),
                 user_login: login,
@@ -248,6 +267,7 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
                 highlight,
                 reward_id,
                 badges,
+                emotes,
                 received: Instant::now(),
             }))
         }
@@ -280,14 +300,34 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
 
 fn parse_badges(raw: &str) -> Vec<Badge> {
     raw.split(',')
-        .filter_map(|b| match b.split('/').next()? {
-            "broadcaster" => Some(Badge::Broadcaster),
-            "moderator" => Some(Badge::Moderator),
-            "vip" => Some(Badge::Vip),
-            "subscriber" | "founder" => Some(Badge::Subscriber),
-            _ => None,
+        .filter_map(|b| {
+            let (set, version) = b.split_once('/')?;
+            (!set.is_empty()).then(|| Badge::new(set, version))
         })
         .collect()
+}
+
+/// `emotes`-Tag, z. B. `25:0-4,12-16/1902:6-10` → sortierte Positionen
+fn parse_emotes(raw: &str, text_len: usize) -> Vec<EmoteSpan> {
+    let mut out: Vec<EmoteSpan> = raw
+        .split('/')
+        .filter_map(|e| e.split_once(':'))
+        .flat_map(|(id, ranges)| {
+            ranges.split(',').filter_map(move |r| {
+                let (a, b) = r.split_once('-')?;
+                let (start, last): (usize, usize) = (a.parse().ok()?, b.parse().ok()?);
+                (start <= last && last < text_len).then(|| EmoteSpan {
+                    start,
+                    end: last + 1,
+                    id: id.to_string(),
+                })
+            })
+        })
+        .collect();
+    out.sort_by_key(|e| e.start);
+    // überlappende Angaben verwerfen
+    out.dedup_by(|b, a| b.start < a.end);
+    out
 }
 
 /// Twitch-Standardfarbe für einen Namen (wenn er keine eigene hat)
@@ -343,11 +383,33 @@ mod tests {
                 assert_eq!(m.text, "Hallo Chat :)");
                 assert_eq!(m.id, "abc-123");
                 assert_eq!(m.color, Color32::from_rgb(0x1E, 0x90, 0xFF));
-                assert_eq!(m.badges, vec![Badge::Moderator, Badge::Subscriber]);
+                assert_eq!(m.badges, vec![Badge::new("moderator", "1"), Badge::new("subscriber", "12")]);
                 assert!(!m.is_action);
             }
             _ => panic!("keine Nachricht erkannt"),
         }
+    }
+
+    #[test]
+    fn parses_emotes() {
+        // „Kappa Hallo Kappa ü VoHiYo“ – Positionen zählen Zeichen, nicht Bytes
+        let raw = "@display-name=X;emotes=25:0-4,12-16/81274:20-25 :x!x@x PRIVMSG #a :Kappa Hallo Kappa ü VoHiYo";
+        match parse_line(raw) {
+            Some(ChatEvent::Message(m)) => {
+                let ids: Vec<_> = m.emotes.iter().map(|e| (e.start, e.end, e.id.as_str())).collect();
+                assert_eq!(ids, vec![(0, 5, "25"), (12, 17, "25"), (20, 26, "81274")]);
+                let chars: Vec<char> = m.text.chars().collect();
+                let s: String = chars[20..26].iter().collect();
+                assert_eq!(s, "VoHiYo");
+            }
+            _ => panic!(),
+        }
+        // ungültige Bereiche werden ignoriert
+        assert!(parse_emotes("1:0-99", 5).is_empty());
+        assert!(matches!(
+            parse_line("@room-id=12345;slow=0 :tmi.twitch.tv ROOMSTATE #a"),
+            Some(ChatEvent::Joined { room_id: Some(id) }) if id == "12345"
+        ));
     }
 
     #[test]
@@ -396,7 +458,7 @@ mod tests {
         assert!(matches!(
             parse_line("@badges=broadcaster/1;color=#9146FF;display-name=Areadox :tmi.twitch.tv USERSTATE #areadox"),
             Some(ChatEvent::OwnState { display_name, badges, .. })
-                if display_name == "Areadox" && badges == vec![Badge::Broadcaster]
+                if display_name == "Areadox" && badges == vec![Badge::new("broadcaster", "1")]
         ));
     }
 }

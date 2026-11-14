@@ -312,6 +312,8 @@ fn to_message(msg: &Envelope) -> Option<ChatMessage> {
         badges: Vec::new(),
         highlight: Some(Highlight::Reward { title, cost }),
         reward_id: None,
+        // Emotes im Text erkennt das Programm später über die bekannten Emote-Namen
+        emotes: Vec::new(),
         received: Instant::now(),
     })
 }

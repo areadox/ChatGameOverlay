@@ -363,6 +363,7 @@ dependencies = [
  "arboard",
  "eframe",
  "global-hotkey",
+ "image",
  "ron",
  "self-replace",
  "serde",

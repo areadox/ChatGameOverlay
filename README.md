@@ -13,7 +13,9 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 - Randloses, transparentes Fenster, immer im Vordergrund
 - **Fixier-Modus:** Mausklicks gehen durch das Overlay ins Spiel
 - Globale Hotkeys, die auch funktionieren, während das Spiel den Fokus hat
-- Namensfarben wie bei Twitch, Abzeichen für Streamer, Mods, VIPs und Subs, `/me`-Nachrichten kursiv
+- Namensfarben wie bei Twitch, `/me`-Nachrichten kursiv
+- **Twitch-Emotes als Bild** direkt im Text
+- **Echte Twitch-Abzeichen** (Streamer, Mod, VIP, Abo-Stufen des Kanals, Prime …) – mit Anmeldung; ohne Anmeldung einfache Symbole
 - Gelöschte Nachrichten, Timeouts und Banns verschwinden auch im Overlay
 - Einstellbar: Schriftgröße, Deckkraft des Hintergrunds, automatisches Ausblenden alter Nachrichten
 - Einstellungen in einem eigenen, normalen Fenster – das Chatfenster zeigt dabei live die eingestellte Transparenz
@@ -134,12 +136,17 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Bekannte Grenzen
 
-- Emotes werden als Text angezeigt (z. B. `Kappa`), nicht als Bild.
+- Emotes von BetterTTV, FrankerFaceZ und 7TV werden noch als Text angezeigt; animierte Twitch-Emotes erscheinen als Standbild.
 - Die Hotkeys sind noch fest eingestellt.
 - Version 0.0.1 hat noch keine Update-Funktion – einmal von Hand auf eine neuere Version wechseln, danach geht es automatisch.
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- Twitch-Emotes werden als Bild im Text angezeigt (auch breite Emotes im richtigen Seitenverhältnis). Emotes, die im Chat schon vorkamen oder zum Kanal gehören, erscheinen auch in eigenen Nachrichten und Kanalpunkte-Texten als Bild.
+- Echte Twitch-Abzeichen statt Symbolen (mit Anmeldung), inklusive der Abo-Abzeichen des Kanals.
+- Neue Einstellung „Emotes als Bild anzeigen“; die Vorschau zeigt jetzt auch Abzeichen und Emotes.
 
 ### 0.0.9
 - Beim Update über „Jetzt neu starten“ wird das alte Programm jetzt zuverlässig beendet; die neue Version wartet, bis es zu ist. (Beim Update von 0.0.8 auf 0.0.9 das alte Programm noch einmal selbst beenden, z. B. über das Tray-Menü.)
