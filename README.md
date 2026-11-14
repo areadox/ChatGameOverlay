@@ -141,7 +141,7 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.8
 - **Kanalpunkte:** Einlösungen deiner Zuschauer erscheinen hervorgehoben im Chat (eigene und automatische Belohnungen, mit Titel, Kosten und Text); „Nachricht hervorheben“ wird farbig markiert. Farbe wählbar, Vorschau in den Einstellungen.
 - Neue Berechtigung `channel:read:redemptions` – nach dem Update einmal neu anmelden.
 
