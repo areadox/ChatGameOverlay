@@ -20,6 +20,11 @@ pub struct Assets {
     channel_badges: HashMap<(String, String), BadgeInfo>,
     /// Emote-Name → Twitch-Emote-ID (global, Kanal und im Chat gesehene)
     emotes: HashMap<String, String>,
+    /// BTTV/FFZ/7TV: Emote-Name → Bildadresse
+    third_global: HashMap<String, String>,
+    third_channel: HashMap<String, String>,
+    /// Twitch-ID des aktuellen Kanals (verhindert, dass ein alter Abruf den neuen Kanal überschreibt)
+    room: Option<String>,
 }
 
 #[derive(Clone)]
@@ -36,8 +41,37 @@ impl Assets {
         self.channel_badges.get(&key).or_else(|| self.global_badges.get(&key)).cloned()
     }
 
-    pub fn emote_id(&self, name: &str) -> Option<&String> {
-        self.emotes.get(name)
+    /// Bildadresse zu einem Wort, falls es ein bekanntes Emote ist.
+    /// `twitch`: auch Twitch-Emotes über den Namen (nur wenn Twitch keine Positionen geliefert hat)
+    /// `third`: BTTV/FFZ/7TV
+    pub fn emote_url_by_name(&self, name: &str, twitch: bool, third: bool) -> Option<String> {
+        if third
+            && let Some(u) = self.third_channel.get(name).or_else(|| self.third_global.get(name))
+        {
+            return Some(u.clone());
+        }
+        if twitch {
+            return self.emotes.get(name).map(|id| crate::images::emote_url(id));
+        }
+        None
+    }
+
+    pub fn set_room(&mut self, room: Option<String>) {
+        if self.room != room {
+            self.third_channel.clear();
+            self.channel_badges.clear();
+        }
+        self.room = room;
+    }
+
+    pub fn set_third_party_global(&mut self, map: HashMap<String, String>) {
+        self.third_global = map;
+    }
+
+    pub fn set_third_party_channel(&mut self, room: &str, map: HashMap<String, String>) {
+        if self.room.as_deref() == Some(room) {
+            self.third_channel = map;
+        }
     }
 
     /// Emote aus einer Chatnachricht merken (damit es auch in eigenen Nachrichten erscheint)
@@ -49,6 +83,8 @@ impl Assets {
 
     pub fn clear_channel(&mut self) {
         self.channel_badges.clear();
+        self.third_channel.clear();
+        self.room = None;
     }
 }
 
@@ -171,6 +207,16 @@ mod tests {
         assert!(a.badge(&Badge::new("moderator", "1")).is_none());
         a.learn_emote("Kappa", "25");
         a.learn_emote("Kappa", "999"); // bekannte bleiben
-        assert_eq!(a.emote_id("Kappa").map(String::as_str), Some("25"));
+        assert_eq!(
+            a.emote_url_by_name("Kappa", true, true).as_deref(),
+            Some("https://static-cdn.jtvnw.net/emoticons/v2/25/static/dark/2.0")
+        );
+        assert!(a.emote_url_by_name("Kappa", false, true).is_none());
+        a.set_room(Some("1".into()));
+        a.set_third_party_channel("2", HashMap::from([("catJAM".into(), "x".into())]));
+        assert!(a.emote_url_by_name("catJAM", true, true).is_none(), "alter Kanal");
+        a.set_third_party_channel("1", HashMap::from([("catJAM".into(), "x".into())]));
+        assert_eq!(a.emote_url_by_name("catJAM", false, true).as_deref(), Some("x"));
+        assert!(a.emote_url_by_name("catJAM", true, false).is_none());
     }
 }

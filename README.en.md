@@ -14,7 +14,7 @@ Shows a channel's Twitch chat as a **transparent, always-on-top window** – rig
 - **Lock mode:** mouse clicks go through the overlay into the game
 - Global hotkeys that work while the game has focus
 - Twitch name colors, `/me` messages in italics
-- **Twitch emotes as images** right in the text
+- **Emotes as images** right in the text – from Twitch as well as **BetterTTV, FrankerFaceZ and 7TV** (global and the channel's own)
 - **Real Twitch badges** (broadcaster, mod, VIP, the channel's sub tiers, Prime …) – with login; without login simple symbols
 - Deleted messages, timeouts and bans also disappear from the overlay
 - Adjustable font size, background opacity and automatic fade-out of old messages
@@ -140,7 +140,7 @@ Releases are only created on explicit request, in one of these ways:
 
 ## Known limitations
 
-- Emotes from BetterTTV, FrankerFaceZ and 7TV are still shown as text; animated Twitch emotes appear as still images.
+- Animated emotes appear as still images.
 - The hotkeys can't be changed yet.
 - Version 0.0.1 has no updater – switch to a newer version manually once, after that it's automatic.
 - On Linux, always-on-top and click-through depend on the window manager; there is no tray icon there yet.

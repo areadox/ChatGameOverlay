@@ -9,6 +9,7 @@ mod i18n;
 mod images;
 mod irc;
 mod render;
+mod thirdparty;
 mod tray;
 mod update;
 mod widgets;
@@ -61,6 +62,8 @@ struct Config {
     highlight_color: [u8; 3],
     /// Twitch-Emotes als Bild statt als Text
     emote_images: bool,
+    /// Emotes von BetterTTV, FrankerFaceZ und 7TV
+    third_party_emotes: bool,
 }
 
 impl Default for Config {
@@ -80,6 +83,7 @@ impl Default for Config {
             mark_highlighted: true,
             highlight_color: [145, 70, 255],
             emote_images: true,
+            third_party_emotes: true,
         }
     }
 }
@@ -206,6 +210,8 @@ impl OverlayApp {
         if !app.cfg.channel.trim().is_empty() {
             app.connect(&cc.egui_ctx, false);
         }
+        // globale Emotes von BTTV/FFZ/7TV (ohne Anmeldung)
+        thirdparty::fetch_global(app.assets.clone(), cc.egui_ctx.clone());
         if app.cfg.auto_update_check {
             update::check(app.update.clone(), cc.egui_ctx.clone(), app.cfg.language);
         }
@@ -311,6 +317,7 @@ impl OverlayApp {
             reward_id: None,
             badges: Vec::new(),
             emotes: Vec::new(),
+            emotes_from_twitch: false,
             received: Instant::now(),
         };
         let samples = [
@@ -369,6 +376,7 @@ impl OverlayApp {
             reward_id: None,
             badges: Vec::new(),
             emotes: Vec::new(),
+            emotes_from_twitch: false,
             received: Instant::now(),
         });
     }
@@ -389,6 +397,13 @@ impl OverlayApp {
                 ChatEvent::Redemptions(s) => self.es_status = Some(s),
                 ChatEvent::Joined { room_id } => {
                     self.status = Status::Connected;
+                    if let Ok(mut a) = self.assets.lock() {
+                        a.set_room(room_id.clone());
+                    }
+                    // BTTV/FFZ/7TV brauchen keine Anmeldung
+                    if let Some(id) = &room_id {
+                        thirdparty::fetch_channel(id.clone(), self.assets.clone(), ctx.clone());
+                    }
                     // Kanal-Abzeichen (z. B. Abo-Stufen) und Kanal-Emotes holen
                     if let (Some(id), Some((_, token))) = (room_id, self.auth.credentials()) {
                         assets::fetch_channel(token, id, self.assets.clone(), ctx.clone());
@@ -494,6 +509,7 @@ impl OverlayApp {
             badges,
             // Emotes erkennt die Darstellung über die bekannten Namen
             emotes: Vec::new(),
+            emotes_from_twitch: false,
             received: Instant::now(),
         });
     }
@@ -805,6 +821,13 @@ impl OverlayApp {
                     );
                 }
                 ui.checkbox(&mut self.cfg.emote_images, l.t("Emotes als Bild anzeigen", "Show emotes as images"));
+                ui.add_enabled(
+                    self.cfg.emote_images,
+                    egui::Checkbox::new(
+                        &mut self.cfg.third_party_emotes,
+                        l.t("Emotes von BetterTTV, FrankerFaceZ und 7TV", "Emotes from BetterTTV, FrankerFaceZ and 7TV"),
+                    ),
+                );
                 ui.checkbox(
                     &mut self.cfg.auto_hide_bg,
                     l.t(
@@ -1101,6 +1124,7 @@ impl OverlayApp {
             size,
             badges: self.cfg.show_badges,
             emotes: self.cfg.emote_images,
+            third_party: self.cfg.third_party_emotes,
             lang: l,
         };
         // getrennte Felder, damit Bilder-Cache und Nachrichten gleichzeitig nutzbar sind

@@ -314,6 +314,7 @@ fn to_message(msg: &Envelope) -> Option<ChatMessage> {
         reward_id: None,
         // Emotes im Text erkennt das Programm später über die bekannten Emote-Namen
         emotes: Vec::new(),
+        emotes_from_twitch: false,
         received: Instant::now(),
     })
 }

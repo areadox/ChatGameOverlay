@@ -35,6 +35,8 @@ pub struct Options {
     pub size: f32,
     pub badges: bool,
     pub emotes: bool,
+    /// Emotes von BTTV, FFZ und 7TV
+    pub third_party: bool,
     pub lang: Lang,
 }
 
@@ -153,7 +155,7 @@ pub fn atoms(m: &ChatMessage, o: &Options, assets: &Assets) -> Vec<Atom> {
         }
         if !m.text.is_empty() {
             out.push(Atom::Newline);
-            push_text(&mut out, &m.text, &m.emotes, &white, o, assets);
+            push_text(&mut out, m, &white, o, assets);
         }
         return out;
     }
@@ -184,10 +186,10 @@ pub fn atoms(m: &ChatMessage, o: &Options, assets: &Assets) -> Vec<Atom> {
     if m.is_action {
         out.push(Atom::Text(" ".into(), white.clone()));
         let f = TextFormat { italics: true, ..name_fmt };
-        push_text(&mut out, &m.text, &m.emotes, &f, o, assets);
+        push_text(&mut out, m, &f, o, assets);
     } else {
         out.push(Atom::Text(": ".into(), white.clone()));
-        push_text(&mut out, &m.text, &m.emotes, &white, o, assets);
+        push_text(&mut out, m, &white, o, assets);
     }
     out
 }
@@ -203,39 +205,47 @@ fn badge_symbol(b: &Badge) -> Option<(&'static str, Color32)> {
     })
 }
 
-/// Text mit Emotes: bekannte Positionen aus dem Chat, sonst bekannte Emote-Namen
-fn push_text(out: &mut Vec<Atom>, text: &str, spans: &[EmoteSpan], f: &TextFormat, o: &Options, assets: &Assets) {
+struct Span {
+    start: usize,
+    end: usize,
+    url: String,
+}
+
+/// Text mit Emotes: Twitch-Positionen aus dem Chat, dazu Emotes über den Namen
+/// (BTTV/FFZ/7TV immer, Twitch nur, wenn Twitch keine Positionen geliefert hat)
+fn push_text(out: &mut Vec<Atom>, m: &ChatMessage, f: &TextFormat, o: &Options, assets: &Assets) {
+    let text = &m.text;
     if !o.emotes {
         push_words(out, text, f);
         return;
     }
     let chars: Vec<char> = text.chars().collect();
-    let found;
-    let spans = if spans.is_empty() {
-        found = spans_from_names(&chars, assets);
-        &found[..]
-    } else {
-        spans
-    };
+    let spans = emote_spans(&chars, &m.emotes, !m.emotes_from_twitch, o.third_party, assets);
     let h = (o.size * 1.75).round();
     let mut pos = 0;
     for s in spans {
-        if s.start < pos || s.end > chars.len() {
-            continue;
-        }
         let before: String = chars[pos..s.start].iter().collect();
         push_words(out, &before, f);
         let name: String = chars[s.start..s.end].iter().collect();
-        out.push(Atom::Image { url: emote_url(&s.id), height: h, alt: name, alt_format: f.clone() });
+        out.push(Atom::Image { url: s.url, height: h, alt: name, alt_format: f.clone() });
         pos = s.end;
     }
     let rest: String = chars[pos..].iter().collect();
     push_words(out, &rest, f);
 }
 
-/// Wörter, die bekannte Emote-Namen sind, als Emote markieren
-pub fn spans_from_names(chars: &[char], assets: &Assets) -> Vec<EmoteSpan> {
-    let mut spans = Vec::new();
+fn emote_spans(
+    chars: &[char],
+    twitch: &[EmoteSpan],
+    twitch_by_name: bool,
+    third: bool,
+    assets: &Assets,
+) -> Vec<Span> {
+    let mut spans: Vec<Span> = twitch
+        .iter()
+        .filter(|s| s.start < s.end && s.end <= chars.len())
+        .map(|s| Span { start: s.start, end: s.end, url: emote_url(&s.id) })
+        .collect();
     let mut i = 0;
     while i < chars.len() {
         if chars[i].is_whitespace() {
@@ -246,11 +256,16 @@ pub fn spans_from_names(chars: &[char], assets: &Assets) -> Vec<EmoteSpan> {
         while i < chars.len() && !chars[i].is_whitespace() {
             i += 1;
         }
+        if spans.iter().any(|s| s.start < i && start < s.end) {
+            continue; // schon ein Twitch-Emote
+        }
         let word: String = chars[start..i].iter().collect();
-        if let Some(id) = assets.emote_id(&word) {
-            spans.push(EmoteSpan { start, end: i, id: id.clone() });
+        if let Some(url) = assets.emote_url_by_name(&word, twitch_by_name, third) {
+            spans.push(Span { start, end: i, url });
         }
     }
+    spans.sort_by_key(|s| s.start);
+    spans.dedup_by(|b, a| b.start < a.end);
     spans
 }
 
@@ -289,25 +304,48 @@ mod tests {
             .collect()
     }
 
+    fn msg(text: &str, emotes: Vec<EmoteSpan>, from_twitch: bool) -> ChatMessage {
+        ChatMessage {
+            id: String::new(),
+            user_login: "x".into(),
+            display_name: "X".into(),
+            color: Color32::WHITE,
+            text: text.into(),
+            is_action: false,
+            system: false,
+            highlight: None,
+            reward_id: None,
+            badges: Vec::new(),
+            emotes,
+            emotes_from_twitch: from_twitch,
+            received: std::time::Instant::now(),
+        }
+    }
+
     #[test]
     fn splits_text_and_emotes() {
         let mut a = Assets::default();
         a.learn_emote("Kappa", "25");
-        let o = Options { size: 16.0, badges: false, emotes: true, lang: Lang::De };
+        a.set_third_party_global(std::collections::HashMap::from([("catJAM".into(), "https://x/cat".into())]));
+        let o = Options { size: 16.0, badges: false, emotes: true, third_party: true, lang: Lang::De };
         let f = TextFormat::default();
-        // mit Positionen aus dem Chat
+        // Chatnachricht mit Twitch-Positionen + BTTV-Emote über den Namen
         let mut out = Vec::new();
-        let spans = [EmoteSpan { start: 6, end: 11, id: "25".into() }];
-        push_text(&mut out, "Hallo Kappa wie gehts", &spans, &f, &o, &a);
-        assert_eq!(texts(&out), ["Hallo ", "[Kappa]", " ", "wie ", "gehts"]);
-        // ohne Positionen (eigene Nachricht): über bekannte Namen
+        let spans = vec![EmoteSpan { start: 6, end: 11, id: "25".into() }];
+        push_text(&mut out, &msg("Hallo Kappa wie catJAM", spans, true), &f, &o, &a);
+        assert_eq!(texts(&out), ["Hallo ", "[Kappa]", " ", "wie ", "[catJAM]"]);
+        // Chatnachricht ohne Twitch-Positionen: „Kappa“ nicht raten (Absender hat es evtl. nicht)
         let mut out = Vec::new();
-        push_text(&mut out, "Kappa ü Kappa", &[], &f, &o, &a);
+        push_text(&mut out, &msg("Kappa catJAM", vec![], true), &f, &o, &a);
+        assert_eq!(texts(&out), ["Kappa ", "[catJAM]"]);
+        // eigene Nachricht: Twitch-Emotes über bekannte Namen
+        let mut out = Vec::new();
+        push_text(&mut out, &msg("Kappa ü Kappa", vec![], false), &f, &o, &a);
         assert_eq!(texts(&out), ["[Kappa]", " ", "ü ", "[Kappa]"]);
-        // Emotes abgeschaltet
-        let o2 = Options { emotes: false, ..o };
+        // BTTV/FFZ/7TV abgeschaltet
+        let o2 = Options { third_party: false, ..o };
         let mut out = Vec::new();
-        push_text(&mut out, "Kappa", &spans[..0], &f, &o2, &a);
-        assert_eq!(texts(&out), ["Kappa"]);
+        push_text(&mut out, &msg("catJAM", vec![], true), &f, &o2, &a);
+        assert_eq!(texts(&out), ["catJAM"]);
     }
 }

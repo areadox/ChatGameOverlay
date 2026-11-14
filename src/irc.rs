@@ -32,6 +32,8 @@ pub struct ChatMessage {
     pub badges: Vec<Badge>,
     /// Twitch-Emotes im Text (Zeichenpositionen)
     pub emotes: Vec<EmoteSpan>,
+    /// `emotes` stammt von Twitch (Chatnachricht) – dann keine Twitch-Emotes über den Namen raten
+    pub emotes_from_twitch: bool,
     pub received: Instant,
 }
 
@@ -268,6 +270,7 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
                 reward_id,
                 badges,
                 emotes,
+                emotes_from_twitch: true,
                 received: Instant::now(),
             }))
         }

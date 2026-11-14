@@ -14,7 +14,7 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 - **Fixier-Modus:** Mausklicks gehen durch das Overlay ins Spiel
 - Globale Hotkeys, die auch funktionieren, während das Spiel den Fokus hat
 - Namensfarben wie bei Twitch, `/me`-Nachrichten kursiv
-- **Twitch-Emotes als Bild** direkt im Text
+- **Emotes als Bild** direkt im Text – von Twitch sowie von **BetterTTV, FrankerFaceZ und 7TV** (global und die des Kanals)
 - **Echte Twitch-Abzeichen** (Streamer, Mod, VIP, Abo-Stufen des Kanals, Prime …) – mit Anmeldung; ohne Anmeldung einfache Symbole
 - Gelöschte Nachrichten, Timeouts und Banns verschwinden auch im Overlay
 - Einstellbar: Schriftgröße, Deckkraft des Hintergrunds, automatisches Ausblenden alter Nachrichten
@@ -136,14 +136,15 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Bekannte Grenzen
 
-- Emotes von BetterTTV, FrankerFaceZ und 7TV werden noch als Text angezeigt; animierte Twitch-Emotes erscheinen als Standbild.
+- Animierte Emotes erscheinen als Standbild.
 - Die Hotkeys sind noch fest eingestellt.
 - Version 0.0.1 hat noch keine Update-Funktion – einmal von Hand auf eine neuere Version wechseln, danach geht es automatisch.
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.10
+- Emotes von **BetterTTV, FrankerFaceZ und 7TV** werden als Bild angezeigt – die globalen und die des eingestellten Kanals, auch ohne Anmeldung. Abschaltbar in den Einstellungen.
 - Twitch-Emotes werden als Bild im Text angezeigt (auch breite Emotes im richtigen Seitenverhältnis). Emotes, die im Chat schon vorkamen oder zum Kanal gehören, erscheinen auch in eigenen Nachrichten und Kanalpunkte-Texten als Bild.
 - Echte Twitch-Abzeichen statt Symbolen (mit Anmeldung), inklusive der Abo-Abzeichen des Kanals.
 - Neue Einstellung „Emotes als Bild anzeigen“; die Vorschau zeigt jetzt auch Abzeichen und Emotes.
