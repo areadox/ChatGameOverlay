@@ -123,6 +123,8 @@ struct OverlayApp {
     write_return: Option<(isize, bool)>,
     /// Kanalpunkte-Empfang: `None` = läuft nicht (nicht angemeldet, fremder Kanal …)
     es_status: Option<EsStatus>,
+    /// Beenden angefordert (nach Update); Sicherheitsnetz, falls das Fenster nicht schließt
+    quitting: Option<Instant>,
 }
 
 impl OverlayApp {
@@ -183,6 +185,7 @@ impl OverlayApp {
             compose_focus: false,
             write_return: None,
             es_status: None,
+            quitting: None,
         };
         if !app.cfg.channel.trim().is_empty() {
             app.connect(&cc.egui_ctx, false);
@@ -463,7 +466,9 @@ impl OverlayApp {
     fn restart_after_update(&mut self, ctx: &egui::Context) {
         let l = self.cfg.language;
         if update::restart() {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
+            // ans Hauptfenster schicken – das Einstellungsfenster würde sich nur minimieren
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
+            self.quitting = Some(Instant::now());
         } else if let Ok(mut g) = self.update.lock() {
             *g = UpdateState::Failed(
                 l.t(
@@ -1253,6 +1258,13 @@ impl eframe::App for OverlayApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if let Some(t) = self.quitting {
+            if t.elapsed() > Duration::from_secs(3) {
+                // Fenster hat sich nicht geschlossen → Programm hart beenden
+                std::process::exit(0);
+            }
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
+        }
         self.handle_events(&ctx);
         // An- oder abgemeldet bzw. Token erneuert → Chat mit neuen Zugangsdaten verbinden
         let gen_now = self.auth.generation();
@@ -1384,11 +1396,9 @@ fn icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
-    // Nach einem Update kurz warten, bis die alte Instanz beendet ist
-    // (gibt Hotkeys frei und speichert ihre Einstellungen).
-    if std::env::args().any(|a| a == "--nach-update") {
-        std::thread::sleep(Duration::from_millis(1500));
-    }
+    // Nach einem Update warten, bis die alte Instanz beendet ist
+    let args: Vec<String> = std::env::args().collect();
+    update::wait_for_old_instance(&args);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)

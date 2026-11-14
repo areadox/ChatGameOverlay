@@ -141,6 +141,9 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
+### 0.0.9
+- Beim Update über „Jetzt neu starten“ wird das alte Programm jetzt zuverlässig beendet; die neue Version wartet, bis es zu ist. (Beim Update von 0.0.8 auf 0.0.9 das alte Programm noch einmal selbst beenden, z. B. über das Tray-Menü.)
+
 ### 0.0.8
 - **Kanalpunkte:** Einlösungen deiner Zuschauer erscheinen hervorgehoben im Chat (eigene und automatische Belohnungen, mit Titel, Kosten und Text); „Nachricht hervorheben“ wird farbig markiert. Farbe wählbar, Vorschau in den Einstellungen.
 - Neue Berechtigung `channel:read:redemptions` – nach dem Update einmal neu anmelden.

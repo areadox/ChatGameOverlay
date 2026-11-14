@@ -1,6 +1,6 @@
 [package]
 name = "chat-game-overlay"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2024"
 description = "Twitch-Chat als transparentes Overlay immer im Vordergrund über dem Spiel"
 authors = ["areadox"]
@@ -27,7 +27,7 @@ winresource = "0.1.34"
 
 [target."cfg(windows)".dependencies]
 tray-icon = "0.26.1"
-windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 ron = "0.12.3"

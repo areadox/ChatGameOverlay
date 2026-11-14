@@ -127,10 +127,53 @@ pub fn install(state: Shared, ctx: Context, version: String, url: String, l: Lan
 }
 
 /// Startet das (neue) Programm und gibt `true` zurück, wenn das geklappt hat.
+/// Die neue Instanz bekommt unsere Prozess-ID und wartet, bis wir beendet sind.
 pub fn restart() -> bool {
     std::env::current_exe()
-        .and_then(|exe| std::process::Command::new(exe).arg("--nach-update").spawn())
+        .and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg("--nach-update")
+                .arg(std::process::id().to_string())
+                .spawn()
+        })
         .is_ok()
+}
+
+/// Neue Instanz nach einem Update: warten, bis die alte beendet ist
+/// (gibt Hotkeys und Tray frei und hat ihre Einstellungen gespeichert).
+pub fn wait_for_old_instance(args: &[String]) {
+    let Some(pos) = args.iter().position(|a| a == "--nach-update") else {
+        return;
+    };
+    match args.get(pos + 1).and_then(|p| p.parse::<u32>().ok()) {
+        Some(pid) => wait_for_exit(pid, 8000),
+        // ältere Versionen übergeben keine Prozess-ID
+        None => std::thread::sleep(std::time::Duration::from_millis(1500)),
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_exit(pid: u32, timeout_ms: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    // SAFETY: Handle wird nur geöffnet, abgewartet und wieder geschlossen
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !handle.is_null() {
+            WaitForSingleObject(handle, timeout_ms);
+            CloseHandle(handle);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn wait_for_exit(pid: u32, timeout_ms: u32) {
+    let start = std::time::Instant::now();
+    while std::path::Path::new(&format!("/proc/{pid}")).exists()
+        && start.elapsed().as_millis() < timeout_ms as u128
+    {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// Vergleicht Versionen wie „0.0.10“ und „0.0.9“ zahlenweise.
