@@ -9,6 +9,7 @@ Shows a channel's Twitch chat as a **transparent, always-on-top window** – rig
 - Read any channel's chat live – anonymously without login, or logged in with your Twitch account
 - **Log in with Twitch** and write right from the overlay, even via hotkey in the middle of a game
 - Copy and paste with Ctrl+C/V and a right-click menu; right-click messages to copy them
+- **Channel points:** your viewers' redemptions and “Highlight my message” show up highlighted in color in the chat
 - Borderless, transparent, always-on-top window
 - **Lock mode:** mouse clicks go through the overlay into the game
 - Global hotkeys that work while the game has focus
@@ -52,13 +53,23 @@ Reading needs no login. If you also want to write:
 2. Your browser opens `twitch.tv/activate` with a code that is also shown in the settings window. Log in to Twitch there (if you aren't already) and click **Authorize**.
 3. Done – the settings window shows "Logged in as …".
 
-Your password is never entered in the program; it only gets permission from Twitch to read and write chat (`chat:read`, `chat:edit`). The login is saved and renewed automatically. **Log out** in the settings also revokes the permission at Twitch.
+Your password is never entered in the program; it only gets permission from Twitch to read and write chat (`chat:read`, `chat:edit`) and to see channel point redemptions in your channel (`channel:read:redemptions`). The login is saved and renewed automatically. **Log out** in the settings also revokes the permission at Twitch.
 
 **Writing:**
 
 - In edit mode there's an input line at the bottom of the chat window. **Enter** sends.
 - In the middle of a game: **Ctrl + Shift + F11** – the overlay takes the keyboard, type your message, **Enter** sends and focus goes back to the game automatically. **Esc** cancels.
 - `/me text` is sent as an action. Other chat commands (`/ban`, `/timeout` …) aren't supported.
+
+### Channel points
+
+When a viewer redeems a channel points reward, it shows up as a colored box in the chat, e.g. *◆ Max redeemed “Hydrate!” · 500* – including the text for rewards with text input. Automatic rewards (emote unlocks) are shown too, and messages sent with **“Highlight my message”** get the same colored frame.
+
+In the settings under **Channel points**: turn redemptions and highlights on or off separately, pick the **color**, and use **Preview** to put samples into the chat window.
+
+- Twitch provides **all** redemptions only for your **own channel** – logged in with your Twitch account and your channel set. The settings then show “✔ Receiving redemptions”.
+- Without logging in, or in other channels, only rewards with text input (they're in the chat anyway) and “Highlight my message” show up.
+- If you logged in with version 0.0.7, **log in again once**, because channel points need an additional permission. The settings window offers a **Log in again** button for this.
 
 ### Copy and paste
 

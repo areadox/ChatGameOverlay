@@ -18,7 +18,9 @@ use crate::i18n::Lang;
 /// Nicht geheim – sie steckt in jedem Fall in der fertigen .exe.
 pub const CLIENT_ID: &str = "7n6qp3csdo5gf1n0nhk3hmgj73lp9e";
 
-const SCOPES: &str = "chat:read chat:edit";
+const SCOPES: &str = "chat:read chat:edit channel:read:redemptions";
+/// nötig, um Kanalpunkte-Einlösungen zu empfangen
+pub const SCOPE_REDEMPTIONS: &str = "channel:read:redemptions";
 const DEVICE_URL: &str = "https://id.twitch.tv/oauth2/device";
 const TOKEN_URL: &str = "https://id.twitch.tv/oauth2/token";
 const VALIDATE_URL: &str = "https://id.twitch.tv/oauth2/validate";
@@ -39,6 +41,25 @@ pub struct Tokens {
     /// Letzte Prüfung bei Twitch (Unix-Sekunden)
     #[serde(default)]
     pub validated_at: u64,
+    /// Twitch-Benutzer-ID (für Kanalpunkte); fehlt bei Anmeldungen vor 0.0.8
+    #[serde(default)]
+    pub user_id: String,
+    /// erteilte Berechtigungen laut Twitch
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+impl Tokens {
+    pub fn can_read_redemptions(&self) -> bool {
+        self.scopes.iter().any(|s| s == SCOPE_REDEMPTIONS)
+    }
+}
+
+/// Antwort von /oauth2/validate
+struct Validated {
+    login: String,
+    user_id: String,
+    scopes: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,6 +100,8 @@ struct TwitchResp {
     expires_in: Option<u64>,
     // Validate
     login: Option<String>,
+    user_id: Option<String>,
+    scopes: Option<Vec<String>>,
     // Fehler
     message: Option<String>,
 }
@@ -107,8 +130,8 @@ fn post(url: &str, form: &[(&str, &str)]) -> Result<(u16, TwitchResp), String> {
     Ok((status, body))
 }
 
-/// Prüft ein Token bei Twitch; liefert den Login-Namen oder `None`, wenn ungültig
-fn validate(token: &str) -> Result<Option<(String, u64)>, String> {
+/// Prüft ein Token bei Twitch; `None`, wenn es ungültig ist
+fn validate(token: &str) -> Result<Option<Validated>, String> {
     let mut resp = agent()
         .get(VALIDATE_URL)
         .header("Authorization", &format!("OAuth {token}"))
@@ -119,7 +142,11 @@ fn validate(token: &str) -> Result<Option<(String, u64)>, String> {
     }
     let body = resp.body_mut().read_json::<TwitchResp>().unwrap_or_default();
     match body.login {
-        Some(login) => Ok(Some((login, body.expires_in.unwrap_or(0)))),
+        Some(login) => Ok(Some(Validated {
+            login,
+            user_id: body.user_id.unwrap_or_default(),
+            scopes: body.scopes.unwrap_or_default(),
+        })),
         None => Err(body.message.unwrap_or_else(|| "validate".into())),
     }
 }
@@ -242,14 +269,16 @@ impl Auth {
                 ],
             )?;
             if let (Some(access), Some(refresh)) = (tok.access_token, tok.refresh_token) {
-                let (login, _) = validate(&access)?
+                let v = validate(&access)?
                     .ok_or_else(|| l.t("Token ungültig", "Token invalid").to_string())?;
                 self.set_tokens(Some(Tokens {
                     access_token: access,
                     refresh_token: refresh,
-                    login,
+                    login: v.login,
                     expires_at: now() + tok.expires_in.unwrap_or(3600),
                     validated_at: now(),
+                    user_id: v.user_id,
+                    scopes: v.scopes,
                 }));
                 return Ok(());
             }
@@ -295,6 +324,8 @@ impl Auth {
                         login: t.login,
                         expires_at: now() + r.expires_in.unwrap_or(3600),
                         validated_at: now(),
+                        user_id: t.user_id,
+                        scopes: r.scopes.unwrap_or(t.scopes),
                     }));
                     true
                 }
@@ -314,18 +345,28 @@ impl Auth {
                 if let Some(t) = me.tokens() {
                     let forced = me.force_refresh.swap(false, Ordering::Relaxed);
                     let expiring = t.expires_at.saturating_sub(now()) < 600;
-                    let validate_due = now().saturating_sub(t.validated_at) >= 3600;
+                    // ältere Anmeldungen kennen Benutzer-ID und Berechtigungen noch nicht
+                    let validate_due = now().saturating_sub(t.validated_at) >= 3600
+                        || t.user_id.is_empty();
                     let mut ok = true;
                     if forced || expiring {
                         ok = me.refresh();
                     } else if validate_due {
                         match validate(&t.access_token) {
-                            Ok(Some(_)) => {
+                            Ok(Some(v)) => {
+                                let newly_known = t.user_id.is_empty() && !v.user_id.is_empty();
                                 if let Ok(mut g) = me.inner.lock()
                                     && let Some(tk) = g.tokens.as_mut()
                                 {
                                     tk.validated_at = now();
+                                    tk.user_id = v.user_id;
+                                    tk.scopes = v.scopes;
+                                    if newly_known {
+                                        // Chat neu verbinden, damit die Kanalpunkte starten können
+                                        g.generation += 1;
+                                    }
                                 }
+                                me.ctx.request_repaint();
                             }
                             Ok(None) => ok = me.refresh(),
                             Err(_) => {} // offline – später erneut
@@ -365,9 +406,26 @@ mod tests {
             login: "areadox".into(),
             expires_at: 9_999_999_999,
             validated_at: 1,
+            user_id: "1".into(),
+            scopes: vec!["chat:read".into()],
         });
         let text = ron::to_string(&saved).unwrap();
         let loaded: Option<Option<Tokens>> = ron::from_str(&text).ok();
         assert_eq!(loaded.flatten().unwrap().login, "areadox");
+    }
+}
+
+#[cfg(test)]
+mod tests_old_login {
+    use super::Tokens;
+
+    /// Anmeldungen aus 0.0.7 (ohne Benutzer-ID und Berechtigungen) laden weiter
+    #[test]
+    fn loads_tokens_from_0_0_7() {
+        let old = "Some((access_token:\"a\",refresh_token:\"r\",login:\"areadox\",expires_at:1,validated_at:1))";
+        let t: Option<Tokens> = ron::from_str(old).unwrap();
+        let t = t.unwrap();
+        assert!(t.user_id.is_empty());
+        assert!(!t.can_read_redemptions());
     }
 }

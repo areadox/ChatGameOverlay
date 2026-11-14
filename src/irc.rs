@@ -25,8 +25,21 @@ pub struct ChatMessage {
     pub is_action: bool,
     /// Hinweis von Twitch (z. B. Slow-Mode), kein Benutzertext
     pub system: bool,
+    /// farbig hervorheben (Kanalpunkte)
+    pub highlight: Option<Highlight>,
+    /// Chatnachricht, die zu einer eigenen Kanalpunkte-Belohnung gehört (Texteingabe)
+    pub reward_id: Option<String>,
     pub badges: Vec<Badge>,
     pub received: Instant,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Highlight {
+    /// Kanalpunkte-Belohnung eingelöst. `title` beginnt mit „#auto:“ bei
+    /// automatischen Belohnungen (z. B. Emote freischalten), leer = unbekannt.
+    Reward { title: String, cost: u64 },
+    /// „Nachricht hervorheben“ über Kanalpunkte
+    Highlighted,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +63,8 @@ pub enum ChatEvent {
     Notice(String),
     /// Token ungültig – Verbindung wurde beendet
     AuthFailed,
+    /// Zustand des Kanalpunkte-Empfangs (EventSub)
+    Redemptions(crate::eventsub::EsStatus),
 }
 
 /// Zugangsdaten für den Chat: (Login-Name, Token)
@@ -217,6 +232,11 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
                 .and_then(|c| Color32::from_hex(&c).ok())
                 .unwrap_or_else(|| fallback_color(&login));
             let badges = parse_badges(&tag("badges").unwrap_or_default());
+            let highlight = match tag("msg-id").as_deref() {
+                Some("highlighted-message") => Some(Highlight::Highlighted),
+                _ => None,
+            };
+            let reward_id = tag("custom-reward-id").filter(|r| !r.is_empty());
             Some(ChatEvent::Message(ChatMessage {
                 id: tag("id").unwrap_or_default(),
                 user_login: login,
@@ -225,6 +245,8 @@ fn parse_line(raw: &str) -> Option<ChatEvent> {
                 text,
                 is_action,
                 system: false,
+                highlight,
+                reward_id,
                 badges,
                 received: Instant::now(),
             }))
@@ -325,6 +347,23 @@ mod tests {
                 assert!(!m.is_action);
             }
             _ => panic!("keine Nachricht erkannt"),
+        }
+    }
+
+    #[test]
+    fn parses_channel_point_tags() {
+        let raw = "@color=#FF0000;display-name=Max;id=1;msg-id=highlighted-message :max!max@max PRIVMSG #areadox :Seht her!";
+        match parse_line(raw) {
+            Some(ChatEvent::Message(m)) => assert_eq!(m.highlight, Some(Highlight::Highlighted)),
+            _ => panic!(),
+        }
+        let raw = "@color=;custom-reward-id=92af-127c;display-name=Max;id=2 :max!max@max PRIVMSG #areadox :Song: Darude";
+        match parse_line(raw) {
+            Some(ChatEvent::Message(m)) => {
+                assert_eq!(m.reward_id.as_deref(), Some("92af-127c"));
+                assert_eq!(m.highlight, None);
+            }
+            _ => panic!(),
         }
     }
 

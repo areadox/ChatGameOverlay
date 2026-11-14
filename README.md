@@ -9,6 +9,7 @@ Zeigt den Twitch-Chat eines Kanals als **durchsichtiges Fenster immer im Vorderg
 - Chat eines beliebigen Kanals live mitlesen – anonym ohne Login, oder angemeldet mit deinem Twitch-Konto
 - **Mit Twitch anmelden** und direkt aus dem Overlay schreiben, auch per Hotkey mitten im Spiel
 - Kopieren und Einfügen mit Strg+C/V und Rechtsklick-Menü; Rechtsklick auf Nachrichten zum Kopieren
+- **Kanalpunkte:** Einlösungen deiner Zuschauer und „Nachricht hervorheben“ erscheinen farbig hervorgehoben im Chat
 - Randloses, transparentes Fenster, immer im Vordergrund
 - **Fixier-Modus:** Mausklicks gehen durch das Overlay ins Spiel
 - Globale Hotkeys, die auch funktionieren, während das Spiel den Fokus hat
@@ -52,13 +53,23 @@ Zum Mitlesen ist keine Anmeldung nötig. Wer auch schreiben möchte:
 2. Der Browser öffnet `twitch.tv/activate` mit einem Code, der auch im Einstellungsfenster steht. Dort bei Twitch anmelden (falls noch nicht) und auf **Autorisieren** klicken.
 3. Fertig – das Einstellungsfenster zeigt „Angemeldet als …“.
 
-Das Passwort wird dabei nie im Programm eingegeben; das Programm bekommt von Twitch nur die Berechtigung, den Chat zu lesen und zu schreiben (`chat:read`, `chat:edit`). Die Anmeldung bleibt gespeichert und wird automatisch erneuert. **Abmelden** in den Einstellungen nimmt die Berechtigung bei Twitch auch wieder zurück.
+Das Passwort wird dabei nie im Programm eingegeben; das Programm bekommt von Twitch nur die Berechtigung, den Chat zu lesen und zu schreiben (`chat:read`, `chat:edit`) und die Kanalpunkte-Einlösungen in deinem Kanal zu sehen (`channel:read:redemptions`). Die Anmeldung bleibt gespeichert und wird automatisch erneuert. **Abmelden** in den Einstellungen nimmt die Berechtigung bei Twitch auch wieder zurück.
 
 **Schreiben:**
 
 - Im Bearbeiten-Modus gibt es unten im Chatfenster eine Eingabezeile. **Enter** sendet.
 - Mitten im Spiel: **Strg + Umschalt + F11** – das Overlay holt sich die Tastatur, Nachricht tippen, **Enter** sendet, und der Fokus geht automatisch ans Spiel zurück. **Esc** bricht ab.
 - `/me Text` wird als Aktion gesendet. Andere Chat-Befehle (`/ban`, `/timeout` …) werden nicht unterstützt.
+
+### Kanalpunkte
+
+Löst ein Zuschauer eine Kanalpunkte-Belohnung ein, erscheint das als farbiger Kasten im Chat, z. B. *◆ Max hat „Trink was!“ eingelöst · 500* – bei Belohnungen mit Texteingabe samt Text. Automatische Belohnungen (Emote freischalten) werden ebenso angezeigt, und Nachrichten mit **„Nachricht hervorheben“** bekommen denselben farbigen Rahmen.
+
+In den Einstellungen unter **Kanalpunkte**: Einlösungen und Hervorhebungen einzeln an- und abschalten, die **Farbe** wählen und mit **Vorschau** Beispiele ins Chatfenster holen.
+
+- **Alle** Einlösungen gibt Twitch nur für den **eigenen Kanal** heraus – also mit deinem Twitch-Konto angemeldet und deinen Kanal eingestellt. Der Status in den Einstellungen zeigt dann „✔ Einlösungen werden empfangen“.
+- Ohne Anmeldung oder in fremden Kanälen erscheinen nur Belohnungen mit Texteingabe (die stehen ohnehin im Chat) und „Nachricht hervorheben“.
+- Wer sich mit Version 0.0.7 angemeldet hat, muss sich **einmal neu anmelden**, weil die Kanalpunkte eine zusätzliche Berechtigung brauchen. Das Einstellungsfenster bietet dafür einen Knopf **Neu anmelden**.
 
 ### Kopieren und Einfügen
 
@@ -129,6 +140,10 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- **Kanalpunkte:** Einlösungen deiner Zuschauer erscheinen hervorgehoben im Chat (eigene und automatische Belohnungen, mit Titel, Kosten und Text); „Nachricht hervorheben“ wird farbig markiert. Farbe wählbar, Vorschau in den Einstellungen.
+- Neue Berechtigung `channel:read:redemptions` – nach dem Update einmal neu anmelden.
 
 ### 0.0.7
 - Twitch-Anmeldung freigeschaltet: über „Mit Twitch anmelden“ als du selbst anmelden und im Chat schreiben.

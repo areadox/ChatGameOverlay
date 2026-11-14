@@ -2,6 +2,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod auth;
+mod eventsub;
 mod focus;
 mod i18n;
 mod irc;
@@ -24,8 +25,9 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use serde::{Deserialize, Serialize};
 
 use auth::{Auth, AuthState};
+use eventsub::EsStatus;
 use i18n::Lang;
-use irc::{Badge, ChatEvent, ChatMessage, Status};
+use irc::{Badge, ChatEvent, ChatMessage, Highlight, Status};
 use update::UpdateState;
 
 const APP_NAME: &str = "ChatGameOverlay";
@@ -48,6 +50,12 @@ struct Config {
     auto_update_check: bool,
     /// Sprache der Oberfläche
     language: Lang,
+    /// Kanalpunkte-Einlösungen im Chat zeigen
+    show_redemptions: bool,
+    /// „Nachricht hervorheben“ farbig markieren
+    mark_highlighted: bool,
+    /// Farbe für Hervorhebungen
+    highlight_color: [u8; 3],
 }
 
 impl Default for Config {
@@ -63,6 +71,9 @@ impl Default for Config {
             start_locked: false,
             auto_update_check: true,
             language: Lang::detect(),
+            show_redemptions: true,
+            mark_highlighted: true,
+            highlight_color: [145, 70, 255],
         }
     }
 }
@@ -110,6 +121,8 @@ struct OverlayApp {
     compose_focus: bool,
     /// per Hotkey zum Schreiben geöffnet: (Fenster, das vorher den Fokus hatte, war fixiert)
     write_return: Option<(isize, bool)>,
+    /// Kanalpunkte-Empfang: `None` = läuft nicht (nicht angemeldet, fremder Kanal …)
+    es_status: Option<EsStatus>,
 }
 
 impl OverlayApp {
@@ -169,6 +182,7 @@ impl OverlayApp {
             compose: String::new(),
             compose_focus: false,
             write_return: None,
+            es_status: None,
         };
         if !app.cfg.channel.trim().is_empty() {
             app.connect(&cc.egui_ctx, false);
@@ -203,19 +217,93 @@ impl OverlayApp {
         self.stop = Arc::new(AtomicBool::new(false));
         self.status = Status::Connecting;
         irc::spawn(
-            channel,
+            channel.clone(),
             self.auth.credentials(),
             self.tx.clone(),
             out_rx,
             ctx.clone(),
             self.stop.clone(),
         );
+
+        // Kanalpunkte: nur im eigenen Kanal und mit passender Berechtigung
+        self.es_status = None;
+        if let Some(t) = self.auth.tokens()
+            && t.login.eq_ignore_ascii_case(&channel)
+            && t.can_read_redemptions()
+            && !t.user_id.is_empty()
+        {
+            self.es_status = Some(EsStatus::Connecting);
+            eventsub::spawn(t.access_token, t.user_id, self.tx.clone(), ctx.clone(), self.stop.clone());
+        }
     }
 
     fn push_message(&mut self, m: ChatMessage) {
         self.messages.push_back(m);
         while self.messages.len() > self.cfg.max_messages.max(10) {
             self.messages.pop_front();
+        }
+    }
+
+    /// Neue Nachricht aus Chat oder EventSub einsortieren
+    fn incoming(&mut self, mut m: ChatMessage) {
+        if m.reward_id.is_some() {
+            // Belohnung mit Texteingabe: EventSub liefert sie samt Titel – dann nicht doppelt zeigen
+            if self.es_status == Some(EsStatus::Active) {
+                return;
+            }
+            if self.cfg.show_redemptions {
+                m.highlight = Some(Highlight::Reward { title: String::new(), cost: 0 });
+            }
+        }
+        if matches!(m.highlight, Some(Highlight::Reward { .. })) && !self.cfg.show_redemptions {
+            if m.reward_id.is_none() {
+                return; // Einlösung ohne Chattext
+            }
+            m.highlight = None;
+        }
+        self.push_message(m);
+    }
+
+    /// Beispiele, um Aussehen und Farbe zu prüfen
+    fn push_preview(&mut self) {
+        let l = self.cfg.language;
+        let mk = |name: &str, text: &str, hl: Option<Highlight>| ChatMessage {
+            id: String::new(),
+            user_login: name.to_lowercase(),
+            display_name: name.to_string(),
+            color: irc::color_for(&name.to_lowercase()),
+            text: text.to_string(),
+            is_action: false,
+            system: false,
+            highlight: hl,
+            reward_id: None,
+            badges: Vec::new(),
+            received: Instant::now(),
+        };
+        let samples = [
+            mk(
+                "Zuschauer42",
+                "",
+                Some(Highlight::Reward { title: l.t("Trink was!", "Hydrate!").into(), cost: 500 }),
+            ),
+            mk(
+                "MaxMustermann",
+                l.t("Spiel bitte Darude – Sandstorm", "Please play Darude – Sandstorm"),
+                Some(Highlight::Reward { title: l.t("Musikwunsch", "Song request").into(), cost: 1000 }),
+            ),
+            mk(
+                "Lisa",
+                "VoHiYo",
+                Some(Highlight::Reward { title: "#auto:random_sub_emote_unlock".into(), cost: 200 }),
+            ),
+            mk(
+                "Kevin",
+                l.t("Diese Nachricht ist hervorgehoben!", "This message is highlighted!"),
+                Some(Highlight::Highlighted),
+            ),
+        ];
+        for m in samples {
+            self.incoming(m);
         }
     }
 
@@ -228,6 +316,8 @@ impl OverlayApp {
             text,
             is_action: false,
             system: true,
+            highlight: None,
+            reward_id: None,
             badges: Vec::new(),
             received: Instant::now(),
         });
@@ -236,7 +326,7 @@ impl OverlayApp {
     fn handle_events(&mut self, ctx: &egui::Context) {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
-                ChatEvent::Message(m) => self.push_message(m),
+                ChatEvent::Message(m) => self.incoming(m),
                 ChatEvent::Delete(id) => self.messages.retain(|m| m.id != id),
                 ChatEvent::ClearUser(Some(user)) => self.messages.retain(|m| m.user_login != user),
                 ChatEvent::ClearUser(None) => self.messages.clear(),
@@ -246,6 +336,7 @@ impl OverlayApp {
                 }
                 ChatEvent::Notice(text) => self.push_system(text),
                 ChatEvent::AuthFailed => self.auth.report_auth_failed(),
+                ChatEvent::Redemptions(s) => self.es_status = Some(s),
             }
         }
         while let Ok(ev) = GlobalHotKeyEvent::receiver().try_recv() {
@@ -341,6 +432,8 @@ impl OverlayApp {
             text: shown,
             is_action,
             system: false,
+            highlight: None,
+            reward_id: None,
             badges,
             received: Instant::now(),
         });
@@ -608,6 +701,9 @@ impl OverlayApp {
                 self.account_section(ui);
                 ui.add_space(4.0);
                 ui.separator();
+                self.channel_points_section(ui);
+                ui.add_space(4.0);
+                ui.separator();
 
                 ui.add(egui::Slider::new(&mut self.cfg.font_size, 10.0..=40.0).text(l.t("Schriftgröße", "Font size")));
                 let mut pct = (self.cfg.bg_opacity * 100.0).round();
@@ -681,6 +777,111 @@ impl OverlayApp {
                     }
                 });
             });
+    }
+
+    fn channel_points_section(&mut self, ui: &mut egui::Ui) {
+        let l = self.cfg.language;
+        let ok = Color32::from_rgb(60, 200, 90);
+        let warn = Color32::from_rgb(230, 120, 80);
+        ui.label(egui::RichText::new(l.t("Kanalpunkte:", "Channel points:")).strong());
+        ui.checkbox(
+            &mut self.cfg.show_redemptions,
+            l.t("Einlösungen im Chat anzeigen", "Show redemptions in chat"),
+        );
+        ui.checkbox(
+            &mut self.cfg.mark_highlighted,
+            l.t("„Nachricht hervorheben“ farbig markieren", "Mark “Highlight my message” in color"),
+        );
+        ui.horizontal(|ui| {
+            ui.label(l.t("Farbe:", "Color:"));
+            ui.color_edit_button_srgb(&mut self.cfg.highlight_color);
+            if ui
+                .button(l.t("Vorschau", "Preview"))
+                .on_hover_text(l.t(
+                    "Zeigt Beispiel-Einlösungen im Chatfenster",
+                    "Shows sample redemptions in the chat window",
+                ))
+                .clicked()
+            {
+                self.push_preview();
+            }
+        });
+
+        let weak = |ui: &mut egui::Ui, t: &str| {
+            ui.label(egui::RichText::new(t).weak());
+        };
+        let tokens = self.auth.tokens();
+        let Some(t) = tokens else {
+            weak(
+                ui,
+                l.t(
+                    "Melde dich oben mit deinem Twitch-Konto an, um alle Einlösungen in deinem Kanal zu sehen. \
+                     Ohne Anmeldung erscheinen nur Belohnungen mit Texteingabe.",
+                    "Log in with your Twitch account above to see all redemptions in your channel. \
+                     Without logging in, only rewards with text input show up.",
+                ),
+            );
+            return;
+        };
+        if !t.login.eq_ignore_ascii_case(&self.connected_channel) {
+            weak(
+                ui,
+                &l.t(
+                    "Alle Einlösungen gibt Twitch nur für deinen eigenen Kanal (#{k}) heraus. \
+                     Hier erscheinen nur Belohnungen mit Texteingabe.",
+                    "Twitch only provides all redemptions for your own channel (#{k}). \
+                     Here, only rewards with text input show up.",
+                )
+                .replace("{k}", &t.login),
+            );
+            return;
+        }
+        let relogin = |ui: &mut egui::Ui, auth: &Auth| {
+            ui.colored_label(
+                warn,
+                l.t(
+                    "Für die Kanalpunkte fehlt eine Berechtigung – bitte einmal neu anmelden.",
+                    "A permission for channel points is missing – please log in again once.",
+                ),
+            );
+            if ui.button(l.t("Neu anmelden", "Log in again")).clicked() {
+                auth.logout();
+                auth.start_login(l);
+            }
+        };
+        if t.user_id.is_empty() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(l.t("Prüfe Anmeldung …", "Checking login …"));
+            });
+        } else if !t.can_read_redemptions() {
+            relogin(ui, &self.auth);
+        } else {
+            match &self.es_status {
+                Some(EsStatus::Active) => {
+                    ui.colored_label(ok, l.t("✔ Einlösungen werden empfangen", "✔ Receiving redemptions"));
+                }
+                Some(EsStatus::MissingScope) => relogin(ui, &self.auth),
+                Some(EsStatus::Error(e)) => {
+                    ui.colored_label(
+                        warn,
+                        l.t(
+                            "Verbindung für Kanalpunkte gestört – neuer Versuch läuft …",
+                            "Channel points connection interrupted – retrying …",
+                        ),
+                    );
+                    if !e.is_empty() {
+                        weak(ui, e);
+                    }
+                }
+                Some(EsStatus::Connecting) | None => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(l.t("Verbinde Kanalpunkte …", "Connecting channel points …"));
+                    });
+                }
+            }
+        }
     }
 
     fn account_section(&mut self, ui: &mut egui::Ui) {
@@ -843,12 +1044,35 @@ impl OverlayApp {
                     if alpha <= 0.0 {
                         continue;
                     }
-                    let job = build_job(m, size, width, alpha, self.cfg.show_badges);
+                    // Kanalpunkte: farbiger Kasten mit Balken links
+                    let boxed = match &m.highlight {
+                        Some(Highlight::Reward { .. }) => self.cfg.show_redemptions,
+                        Some(Highlight::Highlighted) => self.cfg.mark_highlighted,
+                        None => false,
+                    };
+                    let (pad, bar) = if boxed { (6.0, 3.0) } else { (0.0, 0.0) };
+                    let text_w = width - 2.0 * pad - bar;
+                    let job = build_job(m, size, text_w, alpha, self.cfg.show_badges, l);
                     let galley = ui.painter().layout_job(job);
                     let (rect, resp) = ui.allocate_exact_size(
-                        vec2(width, galley.size().y + 2.0),
+                        vec2(width, galley.size().y + 2.0 + 2.0 * pad),
                         if edit_mode { Sense::click() } else { Sense::hover() },
                     );
+                    if boxed {
+                        let [r, g, b] = self.cfg.highlight_color;
+                        let col = Color32::from_rgb(r, g, b);
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(4),
+                            col.gamma_multiply(0.35 * alpha),
+                        );
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(rect.min, vec2(bar, rect.height())),
+                            CornerRadius { nw: 4, sw: 4, ne: 0, se: 0 },
+                            col.gamma_multiply(alpha),
+                        );
+                    }
+                    let text_pos = rect.min + vec2(pad + bar, pad);
                     if edit_mode {
                         resp.context_menu(|ui| {
                             if ui.button(l.t("Nachricht kopieren", "Copy message")).clicked() {
@@ -874,12 +1098,12 @@ impl OverlayApp {
                     let shadow = Color32::from_black_alpha((200.0 * alpha) as u8);
                     for off in [vec2(1.0, 1.0), vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(-1.0, -1.0)] {
                         ui.painter().galley_with_override_text_color(
-                            rect.min + off,
+                            text_pos + off,
                             galley.clone(),
                             shadow,
                         );
                     }
-                    ui.painter().galley(rect.min, galley, Color32::WHITE);
+                    ui.painter().galley(text_pos, galley, Color32::WHITE);
                     ui.add_space(size * 0.15);
                 }
             });
@@ -891,7 +1115,7 @@ impl OverlayApp {
 }
 
 /// Baut eine Chatzeile: [Abzeichen] Name: Text
-fn build_job(m: &ChatMessage, size: f32, width: f32, alpha: f32, badges: bool) -> LayoutJob {
+fn build_job(m: &ChatMessage, size: f32, width: f32, alpha: f32, badges: bool, l: Lang) -> LayoutJob {
     let a = |c: Color32| c.gamma_multiply(alpha);
     let font = FontId::proportional(size);
     let mut job = LayoutJob::default();
@@ -908,6 +1132,49 @@ fn build_job(m: &ChatMessage, size: f32, width: f32, alpha: f32, badges: bool) -
                 ..Default::default()
             },
         );
+        return job;
+    }
+
+    if let Some(Highlight::Reward { title, cost }) = &m.highlight {
+        let fmt = |color: Color32| TextFormat { font_id: font_reward(size), color: a(color), ..Default::default() };
+        let name_color = a(readable(m.color));
+        job.append("◆ ", 0.0, fmt(Color32::from_rgb(255, 210, 90)));
+        job.append(&m.display_name, 0.0, TextFormat { color: name_color, ..fmt(Color32::WHITE) });
+        if let Some(kind) = title.strip_prefix("#auto:") {
+            let phrase = match kind {
+                "random_sub_emote_unlock" => l.t(" hat ein zufälliges Emote freigeschaltet", " unlocked a random emote"),
+                "chosen_sub_emote_unlock" => l.t(" hat ein Emote freigeschaltet", " unlocked an emote"),
+                "chosen_modified_sub_emote_unlock" => {
+                    l.t(" hat ein verändertes Emote freigeschaltet", " unlocked a modified emote")
+                }
+                _ => l.t(" hat eine Belohnung eingelöst", " redeemed a reward"),
+            };
+            job.append(phrase, 0.0, fmt(Color32::WHITE));
+        } else if title.is_empty() {
+            job.append(
+                l.t(" hat eine Kanalpunkte-Belohnung eingelöst", " redeemed a channel points reward"),
+                0.0,
+                fmt(Color32::WHITE),
+            );
+        } else {
+            job.append(l.t(" hat ", " redeemed "), 0.0, fmt(Color32::WHITE));
+            job.append(
+                &format!("{}{title}{}", l.t("„", "“"), l.t("“", "”")),
+                0.0,
+                fmt(Color32::from_rgb(255, 210, 90)),
+            );
+            job.append(l.t(" eingelöst", ""), 0.0, fmt(Color32::WHITE));
+        }
+        if *cost > 0 {
+            job.append(&format!("  · {cost}"), 0.0, fmt(Color32::from_gray(190)));
+        }
+        if !m.text.is_empty() {
+            job.append(
+                &format!("\n{}", m.text),
+                0.0,
+                TextFormat { font_id: font.clone(), color: a(Color32::WHITE), ..Default::default() },
+            );
+        }
         return job;
     }
 
@@ -953,6 +1220,10 @@ fn build_job(m: &ChatMessage, size: f32, width: f32, alpha: f32, badges: bool) -
         );
     }
     job
+}
+
+fn font_reward(size: f32) -> FontId {
+    FontId::proportional(size * 0.92)
 }
 
 /// Sehr dunkle Namensfarben aufhellen, damit sie auf dunklem Grund lesbar sind
