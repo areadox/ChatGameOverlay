@@ -50,6 +50,8 @@ struct Config {
     /// Hintergrund im fixierten Modus nur zeigen, wenn Nachrichten sichtbar sind
     auto_hide_bg: bool,
     start_locked: bool,
+    /// Overlay regelmäßig wieder ganz nach vorn holen
+    keep_on_top: bool,
     /// Beim Start auf GitHub nach neuer Version suchen
     auto_update_check: bool,
     /// Sprache der Oberfläche
@@ -77,6 +79,7 @@ impl Default for Config {
             show_badges: true,
             auto_hide_bg: true,
             start_locked: false,
+            keep_on_top: true,
             auto_update_check: true,
             language: Lang::detect(),
             show_redemptions: true,
@@ -109,6 +112,10 @@ struct OverlayApp {
     hk_lock: u32,
     hk_hide: u32,
     hk_write: u32,
+    hk_raise: u32,
+    /// „In den Vordergrund holen“ angefordert
+    raise_requested: bool,
+    last_raise: Instant,
     hotkey_error: Option<String>,
 
     update: update::Shared,
@@ -155,8 +162,9 @@ impl OverlayApp {
         let lock = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F9);
         let hide = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F10);
         let write = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F11);
+        let raise = HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F12);
         let (manager, hotkey_error) = match GlobalHotKeyManager::new() {
-            Ok(m) => match m.register_all(&[lock, hide, write]) {
+            Ok(m) => match m.register_all(&[lock, hide, write, raise]) {
                 Ok(()) => (Some(m), None),
                 Err(e) => (Some(m), Some(e.to_string())),
             },
@@ -189,6 +197,9 @@ impl OverlayApp {
             hk_lock: lock.id(),
             hk_hide: hide.id(),
             hk_write: write.id(),
+            hk_raise: raise.id(),
+            raise_requested: false,
+            last_raise: Instant::now(),
             hotkey_error,
             update: Arc::new(std::sync::Mutex::new(UpdateState::Idle)),
             tray: tray::Tray::new(icon().rgba, 32, cfg_lang),
@@ -419,6 +430,8 @@ impl OverlayApp {
                 self.toggle_lock();
             } else if ev.id == self.hk_hide {
                 self.hidden = !self.hidden;
+            } else if ev.id == self.hk_raise {
+                self.raise_requested = true;
             } else if ev.id == self.hk_write {
                 self.begin_write(ctx);
             }
@@ -617,6 +630,27 @@ impl OverlayApp {
         ui.checkbox(&mut self.cfg.auto_update_check, l.t("Beim Start automatisch nach Updates suchen", "Check for updates on startup"));
     }
 
+    /// Chatfenster nach vorn holen: auf Knopfdruck sofort, sonst (falls eingestellt) alle 3 Sekunden
+    fn keep_in_front(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        let periodic = self.cfg.keep_on_top && self.last_raise.elapsed() >= Duration::from_secs(3);
+        if !(self.raise_requested || periodic) {
+            return;
+        }
+        if self.raise_requested {
+            self.hidden = false;
+        }
+        self.last_raise = Instant::now();
+        let window = focus::window_of(frame);
+        if window != 0 {
+            focus::bring_to_top(window);
+        } else if self.raise_requested {
+            // andere Systeme: Ebene kurz umschalten, damit das Fenster neu einsortiert wird
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+        }
+        self.raise_requested = false;
+    }
+
     fn toggle_lock(&mut self) {
         self.hidden = false;
         self.locked = !self.locked;
@@ -629,6 +663,7 @@ impl OverlayApp {
                 tray::TrayAction::OpenSettings => self.show_settings = true,
                 tray::TrayAction::ToggleLock => self.toggle_lock(),
                 tray::TrayAction::ToggleHide => self.hidden = !self.hidden,
+                tray::TrayAction::Raise => self.raise_requested = true,
                 tray::TrayAction::Quit => {
                     ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close)
                 }
@@ -703,6 +738,17 @@ impl OverlayApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("✖").on_hover_text(l.t("Beenden", "Quit")).clicked() {
                     ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+                }
+                if ui
+                    .button("📌")
+                    .on_hover_text(format!(
+                        "{} ({})",
+                        l.t("In den Vordergrund holen", "Bring to front"),
+                        l.hotkey_raise()
+                    ))
+                    .clicked()
+                {
+                    self.raise_requested = true;
                 }
                 let update_color = Color32::from_rgb(60, 200, 90);
                 match self.update_state() {
@@ -836,6 +882,20 @@ impl OverlayApp {
                     ),
                 );
                 ui.checkbox(&mut self.cfg.start_locked, l.t("Beim Start gleich fixieren", "Start locked"));
+                ui.checkbox(
+                    &mut self.cfg.keep_on_top,
+                    l.t("Chatfenster automatisch im Vordergrund halten", "Keep chat window in front automatically"),
+                )
+                .on_hover_text(l.t(
+                    "Holt das Chatfenster alle paar Sekunden wieder ganz nach vorn, falls ein Spiel oder Programm sich davor geschoben hat.",
+                    "Brings the chat window back to the very front every few seconds if a game or program moved in front of it.",
+                ));
+                if ui
+                    .button(format!("📌 {}", l.t("Chatfenster jetzt in den Vordergrund holen", "Bring chat window to front now")))
+                    .clicked()
+                {
+                    self.raise_requested = true;
+                }
 
                 ui.add_space(8.0);
                 ui.separator();
@@ -844,6 +904,11 @@ impl OverlayApp {
                 ui.label(egui::RichText::new(l.t("Hotkeys (auch im Spiel):", "Hotkeys (work in-game too):")).strong());
                 ui.label(format!("{}: {}", l.hotkey_lock(), l.t("fixieren / bearbeiten", "lock / edit")));
                 ui.label(format!("{}: {}", l.hotkey_hide(), l.t("ein- / ausblenden", "show / hide")));
+                ui.label(format!(
+                    "{}: {}",
+                    l.hotkey_raise(),
+                    l.t("Chatfenster in den Vordergrund holen", "bring chat window to front")
+                ));
                 ui.label(format!(
                     "{}: {}",
                     l.hotkey_write(),
@@ -1269,7 +1334,7 @@ impl eframe::App for OverlayApp {
         Duration::from_secs(10)
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if let Some(t) = self.quitting {
             if t.elapsed() > Duration::from_secs(3) {
@@ -1305,6 +1370,7 @@ impl eframe::App for OverlayApp {
             self.passthrough_applied = Some(passthrough);
         }
         self.handle_tray(&ctx);
+        self.keep_in_front(&ctx, frame);
         self.settings_window(&ctx);
         if self.hidden {
             return;

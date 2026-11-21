@@ -364,6 +364,7 @@ dependencies = [
  "eframe",
  "global-hotkey",
  "image",
+ "raw-window-handle",
  "ron",
  "self-replace",
  "serde",

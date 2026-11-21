@@ -33,6 +33,10 @@ impl Lang {
         self.t("Strg + Umschalt + F10", "Ctrl + Shift + F10")
     }
 
+    pub fn hotkey_raise(self) -> &'static str {
+        self.t("Strg + Umschalt + F12", "Ctrl + Shift + F12")
+    }
+
     pub fn hotkey_write(self) -> &'static str {
         self.t("Strg + Umschalt + F11", "Ctrl + Shift + F11")
     }

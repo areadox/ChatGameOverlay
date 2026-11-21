@@ -3,6 +3,7 @@
 #[cfg_attr(not(windows), allow(dead_code))]
 pub enum TrayAction {
     OpenSettings,
+    Raise,
     ToggleLock,
     ToggleHide,
     Quit,
@@ -19,8 +20,10 @@ mod imp {
     pub struct Tray {
         _icon: TrayIcon,
         settings_item: MenuItem,
+        raise_item: MenuItem,
         quit_item: MenuItem,
         settings: MenuId,
+        raise: MenuId,
         quit: MenuId,
         lock: CheckMenuItem,
         hide: CheckMenuItem,
@@ -32,10 +35,12 @@ mod imp {
             let menu = Menu::new();
             let (t_settings, t_lock, t_hide, t_quit) = texts(lang);
             let settings = MenuItem::new(t_settings, true, None);
+            let raise = MenuItem::new(raise_text(lang), true, None);
             let lock = CheckMenuItem::new(t_lock, true, false, None);
             let hide = CheckMenuItem::new(t_hide, true, false, None);
             let quit = MenuItem::new(t_quit, true, None);
             menu.append(&settings).ok()?;
+            menu.append(&raise).ok()?;
             menu.append(&PredefinedMenuItem::separator()).ok()?;
             menu.append(&lock).ok()?;
             menu.append(&hide).ok()?;
@@ -53,8 +58,10 @@ mod imp {
             Some(Self {
                 _icon: tray,
                 settings: settings.id().clone(),
+                raise: raise.id().clone(),
                 quit: quit.id().clone(),
                 settings_item: settings,
+                raise_item: raise,
                 quit_item: quit,
                 lock,
                 hide,
@@ -67,6 +74,8 @@ mod imp {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
                 if ev.id == self.settings {
                     out.push(TrayAction::OpenSettings);
+                } else if ev.id == self.raise {
+                    out.push(TrayAction::Raise);
                 } else if ev.id == self.quit {
                     out.push(TrayAction::Quit);
                 } else if ev.id == *self.lock.id() {
@@ -98,6 +107,7 @@ mod imp {
             if prev.map(|p| p.2) != Some(lang) {
                 let (t_settings, t_lock, t_hide, t_quit) = texts(lang);
                 self.settings_item.set_text(t_settings);
+                self.raise_item.set_text(raise_text(lang));
                 self.lock.set_text(t_lock);
                 self.hide.set_text(t_hide);
                 self.quit_item.set_text(t_quit);
@@ -106,6 +116,10 @@ mod imp {
             self.hide.set_checked(hidden);
             self.last.set(Some((locked, hidden, lang)));
         }
+    }
+
+    fn raise_text(l: Lang) -> &'static str {
+        l.t("In den Vordergrund holen (Strg+Umschalt+F12)", "Bring to front (Ctrl+Shift+F12)")
     }
 
     fn texts(l: Lang) -> (&'static str, &'static str, &'static str, &'static str) {

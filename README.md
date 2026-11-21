@@ -46,6 +46,7 @@ Da die Dateien nicht digital signiert sind, warnt Windows SmartScreen beim erste
 | Strg + Umschalt + F9 | Fixieren ⇄ Bearbeiten (verschieben, Einstellungen) |
 | Strg + Umschalt + F10 | Overlay ein- / ausblenden |
 | Strg + Umschalt + F11 | Im Chat schreiben (nur angemeldet) |
+| Strg + Umschalt + F12 | Chatfenster in den Vordergrund holen |
 
 ### Mit Twitch anmelden und schreiben
 
@@ -84,9 +85,16 @@ Das Chatfenster selbst erscheint nicht in der Taskleiste. Dort steht stattdessen
 Im Infobereich neben der Uhr sitzt das Tray-Symbol:
 
 - **Linksklick:** Einstellungen öffnen
-- **Rechtsklick:** Menü mit *Einstellungen öffnen*, *Fixiert*, *Ausgeblendet* und *Beenden*
+- **Rechtsklick:** Menü mit *Einstellungen öffnen*, *In den Vordergrund holen*, *Fixiert*, *Ausgeblendet* und *Beenden*
 
 Beenden lässt sich das Programm über das Tray-Menü, den Knopf **Programm beenden** in den Einstellungen oder das **✖** in der oberen Leiste des Chatfensters.
+
+### Im Vordergrund bleiben
+
+Manche Spiele und Programme schieben sich selbst ganz nach vorn und verdecken dann das Chatfenster. Dagegen:
+
+- **Automatisch:** Die Einstellung *Chatfenster automatisch im Vordergrund halten* (standardmäßig an) holt das Chatfenster alle 3 Sekunden wieder nach vorn – ohne dem Spiel die Tastatur wegzunehmen.
+- **Von Hand:** **📌** in der oberen Leiste des Chatfensters, der Knopf in den Einstellungen, *In den Vordergrund holen* im Tray-Menü oder **Strg + Umschalt + F12**. Ein ausgeblendetes Overlay wird dabei auch wieder eingeblendet.
 
 ### Wichtig: Anzeigemodus des Spiels
 
@@ -142,6 +150,10 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 - Unter Linux hängt „immer im Vordergrund“ und das Durchklicken vom Fenstermanager ab; ein Tray-Symbol gibt es dort noch nicht.
 
 ## Änderungen
+
+### Nächste Version
+- Knopf **📌 In den Vordergrund holen** (obere Leiste, Einstellungen, Tray-Menü, Strg + Umschalt + F12) für den Fall, dass sich ein Spiel vor das Chatfenster schiebt.
+- Neue Einstellung *Chatfenster automatisch im Vordergrund halten* (standardmäßig an): holt das Fenster alle 3 Sekunden wieder nach vorn, ohne den Fokus zu stehlen.
 
 ### 0.0.10
 - Emotes von **BetterTTV, FrankerFaceZ und 7TV** werden als Bild angezeigt – die globalen und die des eingestellten Kanals, auch ohne Anmeldung. Abschaltbar in den Einstellungen.

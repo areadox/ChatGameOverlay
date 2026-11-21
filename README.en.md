@@ -46,6 +46,7 @@ The files are not digitally signed, so Windows SmartScreen warns on first start:
 | Ctrl + Shift + F9 | Lock ⇄ edit (move, settings) |
 | Ctrl + Shift + F10 | Show / hide overlay |
 | Ctrl + Shift + F11 | Write in chat (logged in only) |
+| Ctrl + Shift + F12 | Bring chat window to front |
 
 ### Logging in with Twitch and writing
 
@@ -88,9 +89,16 @@ The chat window itself does not appear in the taskbar. Instead, **ChatGameOverla
 The tray icon sits in the notification area next to the clock:
 
 - **Left click:** open settings
-- **Right click:** menu with *Open settings*, *Locked*, *Hidden* and *Quit*
+- **Right click:** menu with *Open settings*, *Bring to front*, *Locked*, *Hidden* and *Quit*
 
 Quit the program via the tray menu, the **Quit program** button in the settings, or the **✖** in the chat window's top bar.
+
+### Staying in front
+
+Some games and programs push themselves to the very front and then cover the chat window. To counter that:
+
+- **Automatically:** the setting *Keep chat window in front automatically* (on by default) brings the chat window back to the front every 3 seconds – without taking the keyboard away from the game.
+- **Manually:** **📌** in the chat window's top bar, the button in the settings, *Bring to front* in the tray menu, or **Ctrl + Shift + F12**. A hidden overlay is shown again as well.
 
 ### Important: the game's display mode
 
