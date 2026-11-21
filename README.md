@@ -151,7 +151,7 @@ Ein Release entsteht nur auf ausdrücklichen Wunsch, auf einem dieser Wege:
 
 ## Änderungen
 
-### Nächste Version
+### 0.0.11
 - Knopf **📌 In den Vordergrund holen** (obere Leiste, Einstellungen, Tray-Menü, Strg + Umschalt + F12) für den Fall, dass sich ein Spiel vor das Chatfenster schiebt.
 - Neue Einstellung *Chatfenster automatisch im Vordergrund halten* (standardmäßig an): holt das Fenster alle 3 Sekunden wieder nach vorn, ohne den Fokus zu stehlen.
 
